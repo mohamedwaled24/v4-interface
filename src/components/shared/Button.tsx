@@ -1,58 +1,67 @@
+import React from 'react'
 import styled from 'styled-components'
-import { ThemeColors } from '../../theme/theme'
+import { theme } from '../../theme/theme'
 
-interface ButtonProps {
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'outline' | 'critical'
+  emphasis?: 'primary' | 'secondary' | 'tertiary'
   size?: 'small' | 'medium' | 'large'
-  disabled?: boolean
+  isDisabled?: boolean
   fullWidth?: boolean
-  theme: ThemeColors
+  icon?: React.ReactNode
+  onPress?: () => void
 }
 
-const getBackgroundColor = (props: ButtonProps) => {
-  if (props.disabled) return props.theme.backgroundInteractive
+const getBackgroundColor = (props: StyledButtonProps) => {
+  if (props.isDisabled) return props.theme.colors.backgroundInteractive
+  
+  if (props.emphasis === 'tertiary') return 'transparent'
   
   switch (props.variant) {
     case 'primary':
-      return props.theme.accentAction
+      return props.theme.colors.accentAction
     case 'secondary':
-      return props.theme.backgroundInteractive
+      return props.theme.colors.backgroundInteractive
     case 'outline':
       return 'transparent'
     case 'critical':
-      return props.theme.accentCritical
+      return props.theme.colors.accentCritical
     default:
-      return props.theme.accentAction
+      return props.theme.colors.accentAction
   }
 }
 
-const getColor = (props: ButtonProps) => {
-  if (props.disabled) return props.theme.neutral3
+const getColor = (props: StyledButtonProps) => {
+  if (props.isDisabled) return props.theme.colors.neutral3
+  
+  if (props.emphasis === 'tertiary') return props.theme.colors.neutral2
   
   switch (props.variant) {
     case 'primary':
-      return props.theme.white
+      return props.theme.colors.neutral1
     case 'secondary':
-      return props.theme.neutral1
+      return props.theme.colors.neutral1
     case 'outline':
-      return props.theme.neutral1
+      return props.theme.colors.neutral1
     case 'critical':
-      return props.theme.white
+      return props.theme.colors.neutral1
     default:
-      return props.theme.white
+      return props.theme.colors.neutral1
   }
 }
 
-const getBorder = (props: ButtonProps) => {
+const getBorder = (props: StyledButtonProps) => {
+  if (props.emphasis === 'tertiary') return 'none'
+  
   switch (props.variant) {
     case 'outline':
-      return `1px solid ${props.theme.backgroundOutline}`
+      return `1px solid ${props.theme.colors.backgroundOutline}`
     default:
       return 'none'
   }
 }
 
-const getPadding = (props: ButtonProps) => {
+const getPadding = (props: StyledButtonProps) => {
   switch (props.size) {
     case 'small':
       return '6px 12px'
@@ -63,7 +72,11 @@ const getPadding = (props: ButtonProps) => {
   }
 }
 
-export const Button = styled.button<ButtonProps>`
+interface StyledButtonProps extends ButtonProps {
+  $isDisabled?: boolean
+}
+
+const StyledButton = styled.button<StyledButtonProps>`
   display: flex;
   flex-flow: row nowrap;
   align-items: center;
@@ -71,31 +84,33 @@ export const Button = styled.button<ButtonProps>`
   gap: 8px;
   padding: ${getPadding};
   border: ${getBorder};
-  border-radius: ${({ theme }) => theme.borderRadius.medium};
+  border-radius: ${({ theme }) => theme.radii.medium};
   background: ${getBackgroundColor};
   color: ${getColor};
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   width: ${({ fullWidth }) => (fullWidth ? '100%' : 'auto')};
-  cursor: ${({ disabled }) => (disabled ? 'not-allowed' : 'pointer')};
-  transition: ${({ theme }) => theme.transition.duration.fast} all ease;
+  cursor: ${({ isDisabled }) => (isDisabled ? 'not-allowed' : 'pointer')};
+  transition: all 125ms ease;
   user-select: none;
 
   &:hover {
     background: ${props => {
-      if (props.disabled) return props.theme.backgroundInteractive
+      if (props.isDisabled) return props.theme.colors.backgroundInteractive
+      
+      if (props.emphasis === 'tertiary') return props.theme.colors.stateOverlayHover
       
       switch (props.variant) {
         case 'primary':
-          return props.theme.accentActive
+          return props.theme.colors.accentActive
         case 'secondary':
-          return props.theme.backgroundModule
+          return props.theme.colors.backgroundModule
         case 'outline':
-          return props.theme.backgroundModule
+          return props.theme.colors.backgroundModule
         case 'critical':
-          return props.theme.accentFailure
+          return props.theme.colors.accentFailure
         default:
-          return props.theme.accentActive
+          return props.theme.colors.accentActive
       }
     }};
   }
@@ -105,9 +120,37 @@ export const Button = styled.button<ButtonProps>`
   }
 `
 
+export const Button: React.FC<ButtonProps> = ({ 
+  children, 
+  isDisabled = false, 
+  onPress, 
+  icon,
+  ...props 
+}) => {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (isDisabled) return
+    if (onPress) onPress()
+    if (props.onClick) props.onClick(e)
+  }
+
+  return (
+    <StyledButton
+      isDisabled={isDisabled}
+      $isDisabled={isDisabled}
+      onClick={handleClick}
+      disabled={isDisabled}
+      {...props}
+    >
+      {icon}
+      {children}
+    </StyledButton>
+  )
+}
+
 Button.defaultProps = {
   variant: 'primary',
+  emphasis: 'primary',
   size: 'medium',
-  disabled: false,
+  isDisabled: false,
   fullWidth: false,
 }

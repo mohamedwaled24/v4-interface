@@ -4,6 +4,8 @@ import { TokenSelector } from './TokenSelector'
 import { FeeSelector, FEE_OPTIONS } from './FeeSelector'
 import { HookInput } from './HookInput'
 import { NetworkSelector } from '../shared/NetworkSelector'
+import { ResetButton } from '../shared/ResetButton'
+import { Info } from '../shared/icons'
 import { useV4Pool } from '../../hooks/useV4Pool'
 import { useWallet } from '../../hooks/useWallet'
 
@@ -55,22 +57,7 @@ const HeaderActions = styled.div`
   align-items: center;
 `
 
-const ResetButton = styled.button`
-  background: ${({ theme }) => theme.colors.backgroundInteractive};
-  color: ${({ theme }) => theme.colors.neutral2};
-  border: none;
-  border-radius: 12px;
-  padding: 6px 10px;
-  font-size: 14px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.backgroundOutline};
-  }
-`
+// ResetButton is now imported from shared components
 
 const MainContent = styled.div`
   display: grid;
@@ -186,11 +173,12 @@ const CheckboxLabel = styled.label`
   cursor: pointer;
 `
 
-const InfoIcon = styled.span`
+const StyledInfoIcon = styled(Info)`
   margin-left: auto;
   color: ${({ theme }) => theme.colors.neutral3};
   cursor: pointer;
-  font-size: 16px;
+  width: 16px;
+  height: 16px;
   
   &:hover {
     color: ${({ theme }) => theme.colors.neutral2};
@@ -327,10 +315,7 @@ export function CreatePoolForm() {
       <Header>
         <Title>New position</Title>
         <HeaderActions>
-          <ResetButton onClick={handleReset}>
-            <span>↺</span>
-            <span>Reset</span>
-          </ResetButton>
+          <ResetButton onClickReset={handleReset} isDisabled={false} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span>v4 position</span>
             <span>▾</span>
@@ -396,7 +381,7 @@ export function CreatePoolForm() {
                   <CheckboxLabel htmlFor="addHook">
                     Add a Hook (Advanced)
                   </CheckboxLabel>
-                  <InfoIcon title="Hooks allow custom logic to be executed during swaps">ⓘ</InfoIcon>
+                  <StyledInfoIcon title="Hooks allow custom logic to be executed during swaps" />
                 </CheckboxRow>
 
                 <div>

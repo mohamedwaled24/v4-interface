@@ -1,11 +1,12 @@
-import React from 'react'
+import React, { useState } from 'react'
 import styled from 'styled-components'
 import { Token } from '../../types'
 import { useBalance } from '../../hooks/useBalance'
+import { TokenModal } from './TokenModal'
 
 interface Props {
   label: string
-  token?: Token
+  token: Token | null
   onChange: (token: Token) => void
   error?: string
 }
@@ -96,40 +97,39 @@ const ErrorMessage = styled.div`
   margin-top: 4px;
 `
 
-const LoadingIndicator = styled.div`
-  position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: ${({ theme }) => theme.colors.neutral3};
-`
-
 
 
 export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }) => {
   const { balance } = useBalance(token?.address)
-  const [isLoading, setIsLoading] = React.useState(false)
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
-  const handleSelectToken = () => {
-    setIsLoading(true)
-    // TODO: Open token selection modal
-    const mockToken: Token = {
-      address: '0x...',
-      symbol: 'ETH',
-      name: 'Ethereum',
-      decimals: 18,
-    }
-    onChange(mockToken)
-    setIsLoading(false)
+  const handleOpenModal = () => {
+    setIsModalOpen(true)
+  }
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false)
+  }
+
+  const handleSelectToken = (selectedToken: Token) => {
+    onChange(selectedToken)
   }
 
   return (
     <Container>
       <Label>{label}</Label>
-      <InputContainer $error={!!error} onClick={handleSelectToken}>
+      <InputContainer $error={!!error} onClick={handleOpenModal}>
         {token ? (
           <TokenInfo>
-            <TokenLogo>{token.symbol[0]}</TokenLogo>
+            {token.logoURI ? (
+              <img 
+                src={token.logoURI} 
+                alt={token.symbol} 
+                style={{ width: '36px', height: '36px', borderRadius: '18px' }} 
+              />
+            ) : (
+              <TokenLogo>{token.symbol[0]}</TokenLogo>
+            )}
             <TokenDetails>
               <TokenSymbol>{token.symbol}</TokenSymbol>
               <TokenName>{token.name}</TokenName>
@@ -144,7 +144,12 @@ export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }
         )}
       </InputContainer>
       {error && <ErrorMessage>{error}</ErrorMessage>}
-      {isLoading && <LoadingIndicator>Loading...</LoadingIndicator>}
+      
+      <TokenModal 
+        isOpen={isModalOpen} 
+        onClose={handleCloseModal} 
+        onSelectToken={handleSelectToken}
+      />
     </Container>
   )
 }
