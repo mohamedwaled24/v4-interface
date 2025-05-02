@@ -203,8 +203,6 @@ const DepositAmountInputs: React.FC<DepositAmountInputsProps> = ({
           <PercentButton onClick={() => handlePercentageClick(1, 100)}>Max</PercentButton>
         </PercentageButtons>
       </AmountInputContainer>
-
-      <ActionButton>Enter an amount</ActionButton>
     </Container>
   )
 }
