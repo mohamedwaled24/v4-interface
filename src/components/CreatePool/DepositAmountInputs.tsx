@@ -111,7 +111,8 @@ const ActionButton = styled.button`
   cursor: pointer;
   
   &:hover {
-    background: ${({ theme }) => theme.colors.accentActionHover};
+    background: ${({ theme }) => theme.colors.accentAction};
+    opacity: 0.8;
   }
   
   &:disabled {

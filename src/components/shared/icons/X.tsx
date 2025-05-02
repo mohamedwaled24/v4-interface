@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { createIcon, IconProps } from './utils'
 
 export const X = createIcon((props: IconProps) => (

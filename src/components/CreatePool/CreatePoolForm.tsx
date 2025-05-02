@@ -8,6 +8,8 @@ import { ResetButton } from '../shared/ResetButton'
 import { Info } from '../shared/icons'
 import { useV4Pool } from '../../hooks/useV4Pool'
 import { useWallet } from '../../hooks/useWallet'
+import PriceRangeSelector from './PriceRangeSelector'
+import DepositAmountInputs from './DepositAmountInputs'
 
 const Container = styled.div`
   display: flex;
@@ -253,6 +255,12 @@ export function CreatePoolForm() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [showHookInput, setShowHookInput] = useState(false)
+  const [isFullRange, setIsFullRange] = useState(true)
+  const [minPrice, setMinPrice] = useState('')
+  const [maxPrice, setMaxPrice] = useState('')
+  const [token0Amount, setToken0Amount] = useState('')
+  const [token1Amount, setToken1Amount] = useState('')
+  
   const { isConnected } = useWallet()
   const {
     poolState,
@@ -276,6 +284,9 @@ export function CreatePoolForm() {
     } else if (currentStep === 2) {
       setIsLoading(true)
       try {
+        // In a real implementation, we would pass the price range and deposit amounts to createPool
+        // Using the state variables: isFullRange, minPrice, maxPrice, token0Amount, token1Amount
+        console.log('Creating pool with:', { isFullRange, minPrice, maxPrice, token0Amount, token1Amount })
         const result = await createPool()
         if (result.success) {
           // Show success message or redirect
@@ -294,6 +305,11 @@ export function CreatePoolForm() {
   const handleReset = () => {
     setCurrentStep(1)
     setShowHookInput(false)
+    setIsFullRange(true)
+    setMinPrice('')
+    setMaxPrice('')
+    setToken0Amount('')
+    setToken1Amount('')
     // Other state reset would happen in the useV4Pool hook
   }
 
@@ -302,6 +318,25 @@ export function CreatePoolForm() {
     if (!e.target.checked) {
       updateHook('')
     }
+  }
+  
+  const handleRangeChange = (fullRange: boolean, min?: string, max?: string) => {
+    setIsFullRange(fullRange)
+    if (fullRange) {
+      setMinPrice('')
+      setMaxPrice('')
+    } else {
+      setMinPrice(min || '')
+      setMaxPrice(max || '')
+    }
+  }
+  
+  const handleToken0AmountChange = (amount: string) => {
+    setToken0Amount(amount)
+  }
+  
+  const handleToken1AmountChange = (amount: string) => {
+    setToken1Amount(amount)
   }
 
   return (
@@ -416,20 +451,27 @@ export function CreatePoolForm() {
                   </SectionDescription>
                 </SectionHeader>
                 
-                <div style={{ padding: '40px', textAlign: 'center', color: '#8F96AC' }}>
-                  Price range selection UI would go here
-                </div>
+                <PriceRangeSelector 
+                  onRangeChange={handleRangeChange}
+                  token0Symbol={poolState.token0?.symbol}
+                  token1Symbol={poolState.token1?.symbol}
+                />
                 
                 <SectionHeader>
-                  <SectionTitle>Deposit amounts</SectionTitle>
+                  <SectionTitle>Deposit tokens</SectionTitle>
                   <SectionDescription>
-                    Enter the amounts of tokens you want to deposit into this position.
+                    Specify the token amounts for your liquidity contribution.
                   </SectionDescription>
                 </SectionHeader>
                 
-                <div style={{ padding: '40px', textAlign: 'center', color: '#8F96AC' }}>
-                  Deposit amount inputs would go here
-                </div>
+                <DepositAmountInputs 
+                  token0={poolState.token0}
+                  token1={poolState.token1}
+                  token0Amount={token0Amount}
+                  token1Amount={token1Amount}
+                  onToken0AmountChange={handleToken0AmountChange}
+                  onToken1AmountChange={handleToken1AmountChange}
+                />
               </FormSection>
             )}
 
