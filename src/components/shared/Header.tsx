@@ -2,6 +2,18 @@ import React, { useState } from 'react'
 import styled from 'styled-components'
 import { useWallet } from '../../hooks/useWallet'
 
+// Define interface for navigation types
+export enum NavType {
+  TRADE = 'trade',
+  EXPLORE = 'explore',
+  POOL = 'pool'
+}
+
+interface HeaderProps {
+  activeNav: NavType;
+  onNavChange: (nav: NavType) => void;
+}
+
 const HeaderContainer = styled.header`
   display: flex;
   justify-content: space-between;
@@ -29,18 +41,17 @@ const NavLinks = styled.div`
   gap: 32px;
 `
 
-const NavLink = styled.a`
-  color: ${({ theme }) => theme.colors.neutral2};
+const NavLink = styled.a<{ $active?: boolean }>`
+  color: ${({ theme, $active }) => 
+    $active ? theme.colors.neutral1 : theme.colors.neutral2};
   font-size: ${({ theme }) => theme.fontSizes.large};
-  font-weight: ${({ theme }) => theme.fontWeights.medium};
+  font-weight: ${({ theme, $active }) => 
+    $active ? theme.fontWeights.semibold : theme.fontWeights.medium};
   text-decoration: none;
+  cursor: pointer;
   
-  &:hover, &.active {
+  &:hover {
     color: ${({ theme }) => theme.colors.neutral1};
-  }
-  
-  &.active {
-    font-weight: ${({ theme }) => theme.fontWeights.semibold};
   }
 `
 
@@ -116,7 +127,7 @@ const NetworkDot = styled.div`
   background: ${({ theme }) => theme.colors.accentSuccess};
 `
 
-export const Header: React.FC = () => {
+export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
   const { isConnected, address, network, connectWallet } = useWallet()
   const [isConnecting, setIsConnecting] = useState(false)
   
@@ -149,9 +160,24 @@ export const Header: React.FC = () => {
       </Logo>
       
       <NavLinks>
-        <NavLink href="#">Trade</NavLink>
-        <NavLink href="#">Explore</NavLink>
-        <NavLink href="#" className="active">Pool</NavLink>
+        <NavLink 
+          $active={activeNav === NavType.TRADE} 
+          onClick={() => onNavChange(NavType.TRADE)}
+        >
+          Trade
+        </NavLink>
+        <NavLink 
+          $active={activeNav === NavType.EXPLORE} 
+          onClick={() => onNavChange(NavType.EXPLORE)}
+        >
+          Explore
+        </NavLink>
+        <NavLink 
+          $active={activeNav === NavType.POOL} 
+          onClick={() => onNavChange(NavType.POOL)}
+        >
+          Pool
+        </NavLink>
       </NavLinks>
       
       <RightSection>

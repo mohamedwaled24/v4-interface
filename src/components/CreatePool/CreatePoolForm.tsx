@@ -261,7 +261,7 @@ export function CreatePoolForm() {
   const [token0Amount, setToken0Amount] = useState('')
   const [token1Amount, setToken1Amount] = useState('')
   
-  const { isConnected } = useWallet()
+  const { isConnected, connectWallet } = useWallet()
   const {
     poolState,
     validation,
@@ -485,6 +485,15 @@ export function CreatePoolForm() {
         ) : (
           <ConnectPrompt>
             <p>Please connect your wallet to create a pool</p>
+            <ActionButton onClick={async () => {
+              try {
+                await connectWallet();
+              } catch (error) {
+                console.error('Failed to connect wallet:', error);
+              }
+            }}>
+              Connect Wallet
+            </ActionButton>
           </ConnectPrompt>
         )}
       </MainContent>

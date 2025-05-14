@@ -1,3 +1,84 @@
+import 'styled-components';
+
+// Extend the default theme
+declare module 'styled-components' {
+  export interface DefaultTheme {
+    colors: {
+      background: string;
+      backgroundModule: string;
+      backgroundInteractive: string;
+      backgroundOutline: string;
+      accentAction: string;
+      accentActive: string;
+      accentSuccess: string;
+      accentWarning: string;
+      accentFailure: string;
+      accentCritical: string;
+      neutral1: string;
+      neutral2: string;
+      neutral3: string;
+      textPrimary: string;
+      textSecondary: string;
+      textTertiary: string;
+    };
+    shadows: {
+      elevation: string;
+    };
+    opacities: {
+      hover: number;
+      click: number;
+      disabled: number;
+      enabled: number;
+    };
+    fonts: {
+      body: string;
+      heading: string;
+      code: string;
+    };
+    fontSizes: {
+      micro: string;
+      small: string;
+      medium: string;
+      large: string;
+      h3: string;
+      h2: string;
+      h1: string;
+    };
+    fontWeights: {
+      normal: number;
+      medium: number;
+      semibold: number;
+      bold: number;
+    };
+    borderRadius: {
+      small: string;
+      medium: string;
+      large: string;
+      round: string;
+    };
+    breakpoints: {
+      sm: string;
+      md: string;
+      lg: string;
+      xl: string;
+      xxl: string;
+    };
+    transition: {
+      duration: {
+        fast: string;
+        medium: string;
+        slow: string;
+      };
+      timing: {
+        ease: string;
+        in: string;
+        out: string;
+        inOut: string;
+      };
+    };
+  }
+}
+
 // Theme based on Uniswap interface theme
 export const darkTheme = {
   colors: {
@@ -59,6 +140,19 @@ export const darkTheme = {
     lg: '1024px',
     xl: '1280px',
     xxl: '1536px',
+  },
+  transition: {
+    duration: {
+      fast: '125ms',
+      medium: '250ms',
+      slow: '500ms',
+    },
+    timing: {
+      ease: 'ease',
+      in: 'ease-in',
+      out: 'ease-out',
+      inOut: 'ease-in-out',
+    },
   },
 }
 
