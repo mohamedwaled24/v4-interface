@@ -10,17 +10,38 @@ interface WalletState {
   isMetaMaskInstalled: boolean
 }
 
+// Create a global state for wallet that can be accessed across components
+let globalWalletState = {
+  address: null as string | null,
+  isConnected: false,
+  chainId: null as number | null,
+  network: null as NetworkConfig | null,
+  isMetaMaskInstalled: false,
+  publicClient: null as any,
+  walletClient: null as any,
+}
+
+// Create a list of update listeners
+const listeners: (() => void)[] = [];
+
+// Function to update the global state and notify listeners
+function updateGlobalWalletState(updates: Partial<typeof globalWalletState>) {
+  globalWalletState = { ...globalWalletState, ...updates };
+  // Notify all listeners about the state change
+  listeners.forEach(listener => listener());
+}
+
 export function useWallet() {
   const [state, setState] = useState<WalletState>({
-    address: null,
-    isConnected: false,
-    chainId: null,
-    network: null,
-    isMetaMaskInstalled: false
+    address: globalWalletState.address,
+    isConnected: globalWalletState.isConnected,
+    chainId: globalWalletState.chainId,
+    network: globalWalletState.network,
+    isMetaMaskInstalled: globalWalletState.isMetaMaskInstalled
   })
 
-  const [publicClient, setPublicClient] = useState<any>(null)
-  const [walletClient, setWalletClient] = useState<any>(null)
+  const [publicClient, setPublicClient] = useState<any>(globalWalletState.publicClient)
+  const [walletClient, setWalletClient] = useState<any>(globalWalletState.walletClient)
 
   // Check if MetaMask is installed
   const checkIfMetaMaskIsInstalled = useCallback(() => {
@@ -29,10 +50,36 @@ export function useWallet() {
            window.ethereum.isMetaMask;
   }, []);
 
+  // Update local state when global state changes
+  useEffect(() => {
+    const handleStateChange = () => {
+      setState({
+        address: globalWalletState.address,
+        isConnected: globalWalletState.isConnected,
+        chainId: globalWalletState.chainId,
+        network: globalWalletState.network,
+        isMetaMaskInstalled: globalWalletState.isMetaMaskInstalled
+      });
+      setPublicClient(globalWalletState.publicClient);
+      setWalletClient(globalWalletState.walletClient);
+    };
+    
+    // Add listener
+    listeners.push(handleStateChange);
+    
+    // Return cleanup function
+    return () => {
+      const index = listeners.indexOf(handleStateChange);
+      if (index > -1) {
+        listeners.splice(index, 1);
+      }
+    };
+  }, []);
+
   // Initialize wallet connection
   useEffect(() => {
     const isMetaMaskInstalled = checkIfMetaMaskIsInstalled();
-    setState(prev => ({ ...prev, isMetaMaskInstalled }));
+    updateGlobalWalletState({ isMetaMaskInstalled });
     
     if (!isMetaMaskInstalled) {
       console.warn('MetaMask is not installed');
@@ -42,11 +89,11 @@ export function useWallet() {
     const initializeWallet = async () => {
       try {
         // Check if already connected
-        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+        const accounts = await window.ethereum!.request({ method: 'eth_accounts' });
         const isConnected = accounts && accounts.length > 0;
         
         // Get current chainId
-        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        const chainId = await window.ethereum!.request({ method: 'eth_chainId' });
         const networkId = parseInt(chainId, 16);
         const network = SUPPORTED_NETWORKS.find(n => n.id === networkId);
 
@@ -55,25 +102,24 @@ export function useWallet() {
           const public_client = createPublicClient({
             transport: http(network.rpcUrl),
           });
-          setPublicClient(public_client);
+          updateGlobalWalletState({ publicClient: public_client });
         }
 
         // Create wallet client for sending transactions
         if (isConnected) {
           const wallet_client = createWalletClient({
-            transport: custom(window.ethereum),
+            transport: custom(window.ethereum!),
           });
-          setWalletClient(wallet_client);
+          updateGlobalWalletState({ walletClient: wallet_client });
         }
 
         // Update state
-        setState(prev => ({
-          ...prev,
+        updateGlobalWalletState({
           address: isConnected ? accounts[0] : null,
           isConnected,
           chainId: networkId,
           network: network || null,
-        }));
+        });
       } catch (error) {
         console.error('Failed to initialize wallet:', error);
       }
@@ -89,10 +135,10 @@ export function useWallet() {
       window.ethereum.on('disconnect', handleDisconnect);
 
       return () => {
-        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-        window.ethereum.removeListener('chainChanged', handleChainChanged);
-        window.ethereum.removeListener('connect', handleConnect);
-        window.ethereum.removeListener('disconnect', handleDisconnect);
+        window.ethereum!.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum!.removeListener('chainChanged', handleChainChanged);
+        window.ethereum!.removeListener('connect', handleConnect);
+        window.ethereum!.removeListener('disconnect', handleDisconnect);
       };
     }
   }, [checkIfMetaMaskIsInstalled]);
@@ -103,28 +149,25 @@ export function useWallet() {
 
   const handleDisconnect = (error: { code: number; message: string }) => {
     console.log('MetaMask disconnected:', error);
-    setState(prev => ({
-      ...prev,
+    updateGlobalWalletState({
       isConnected: false,
       address: null
-    }));
+    });
   };
 
   const handleAccountsChanged = async (accounts: string[]) => {
     if (accounts.length === 0) {
       // User disconnected
-      setState(prev => ({
-        ...prev,
+      updateGlobalWalletState({
         address: null,
         isConnected: false,
-      }));
+      });
     } else {
       // User switched accounts
-      setState(prev => ({
-        ...prev,
+      updateGlobalWalletState({
         address: accounts[0],
         isConnected: true,
-      }));
+      });
     }
   };
 
@@ -132,18 +175,17 @@ export function useWallet() {
     const networkId = parseInt(chainId, 16);
     const network = SUPPORTED_NETWORKS.find(n => n.id === networkId);
     
-    setState(prev => ({
-      ...prev,
+    updateGlobalWalletState({
       chainId: networkId,
       network: network || null,
-    }));
+    });
 
     // Update public client with new RPC URL
     if (network) {
       const public_client = createPublicClient({
         transport: http(network.rpcUrl),
       });
-      setPublicClient(public_client);
+      updateGlobalWalletState({ publicClient: public_client });
     }
     
     // Reload the page to avoid any inconsistent state
@@ -156,28 +198,27 @@ export function useWallet() {
     }
     
     try {
-      const accounts = await window.ethereum.request({
+      const accounts = await window.ethereum!.request({
         method: 'eth_requestAccounts',
       });
 
       // Get current chainId after connection
-      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+      const chainId = await window.ethereum!.request({ method: 'eth_chainId' });
       const networkId = parseInt(chainId, 16);
       const network = SUPPORTED_NETWORKS.find(n => n.id === networkId);
       
       // Create wallet client
       const wallet_client = createWalletClient({
-        transport: custom(window.ethereum),
+        transport: custom(window.ethereum!),
       });
-      setWalletClient(wallet_client);
+      updateGlobalWalletState({ walletClient: wallet_client });
 
-      setState(prev => ({
-        ...prev,
+      updateGlobalWalletState({
         address: accounts[0],
         isConnected: true,
         chainId: networkId,
         network: network || null,
-      }));
+      });
 
       return true;
     } catch (error) {
@@ -192,7 +233,7 @@ export function useWallet() {
     }
     
     try {
-      await window.ethereum.request({
+      await window.ethereum!.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: `0x${networkId.toString(16)}` }],
       });
@@ -203,7 +244,7 @@ export function useWallet() {
         const network = SUPPORTED_NETWORKS.find(n => n.id === networkId);
         if (network) {
           try {
-            await window.ethereum.request({
+            await window.ethereum!.request({
               method: 'wallet_addEthereumChain',
               params: [{
                 chainId: `0x${networkId.toString(16)}`,
@@ -227,11 +268,10 @@ export function useWallet() {
   const disconnectWallet = () => {
     // Note: MetaMask doesn't support programmatic disconnection
     // This just clears the local state
-    setState(prev => ({
-      ...prev,
+    updateGlobalWalletState({
       address: null,
       isConnected: false,
-    }));
+    });
   };
 
   return {
