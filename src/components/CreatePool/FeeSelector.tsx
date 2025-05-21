@@ -1,7 +1,7 @@
 import styled from 'styled-components'
-import { FeeAmount } from '@uniswap/v3-sdk'
+import { useState } from 'react'
 
-interface FeeOption {
+export interface FeeOption {
   fee: number
   tickSpacing: number
   label: string
@@ -13,28 +13,44 @@ export const FEE_OPTIONS: FeeOption[] = [
   {
     fee: 100,
     tickSpacing: 1,
-    label: '0.01%',
+    label: '0.0100%',
     description: 'Best for very stable pairs',
   },
   {
     fee: 500,
     tickSpacing: 10,
-    label: '0.05%',
+    label: '0.0500%',
     description: 'Best for stable pairs',
   },
   {
     fee: 3000,
     tickSpacing: 60,
-    label: '0.3%',
+    label: '0.3000%',
     description: 'Best for most pairs',
   },
   {
     fee: 10000,
     tickSpacing: 200,
-    label: '1%',
+    label: '1.0000%',
     description: 'Best for exotic pairs',
   },
+  {
+    fee: 20000,
+    tickSpacing: 400,
+    label: '2.0000%',
+    description: 'Best for highly volatile pairs',
+  },
 ]
+
+// Calculate tick spacing based on fee
+const calculateTickSpacing = (fee: number): number => {
+  // Base tick spacing on fee magnitude
+  if (fee <= 100) return 1
+  if (fee <= 500) return 10
+  if (fee <= 3000) return 60
+  if (fee <= 10000) return 200
+  return 400
+}
 
 const Container = styled.div`
   display: flex;
@@ -98,48 +114,115 @@ const Description = styled.div`
   text-align: center;
 `
 
+const CustomFeeInput = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
+  border-radius: ${({ theme }) => theme.radii.medium};
+  background: ${({ theme }) => theme.colors.backgroundModule};
+`
+
+const Input = styled.input`
+  width: 100%;
+  padding: 8px;
+  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
+  border-radius: ${({ theme }) => theme.radii.small};
+  background: ${({ theme }) => theme.colors.backgroundInteractive};
+  color: ${({ theme }) => theme.colors.neutral1};
+  font-size: 14px;
+
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.accentAction};
+  }
+`
+
+const ErrorText = styled.div`
+  color: ${({ theme }) => theme.colors.critical};
+  font-size: 14px;
+  margin-top: 4px;
+`
+
 interface FeeSelectorProps {
-  feeAmount?: FeeAmount
-  onChange: (fee: FeeAmount) => void
+  feeAmount?: FeeOption
+  onChange: (fee: FeeOption) => void
   disabled?: boolean
+  error?: string
 }
 
-const FEE_AMOUNT_DETAIL: { [key: number]: { label: string; description: string } } = {
-  [100]: {
-    label: '0.01%',
-    description: 'Best for very stable pairs',
-  },
-  [500]: {
-    label: '0.05%',
-    description: 'Best for stable pairs',
-  },
-  [3000]: {
-    label: '0.3%',
-    description: 'Best for most pairs',
-  },
-  [10000]: {
-    label: '1%',
-    description: 'Best for exotic pairs',
-  },
-}
+export function FeeSelector({ feeAmount, onChange, disabled, error }: FeeSelectorProps) {
+  const [showCustomFee, setShowCustomFee] = useState(false)
+  const [customFee, setCustomFee] = useState('')
 
-export function FeeSelector({ feeAmount, onChange, disabled }: FeeSelectorProps) {
+  const handleCustomFeeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setCustomFee(value)
+    
+    // Only update if it's a valid number
+    const fee = parseFloat(value)
+    if (!isNaN(fee) && fee > 0) {
+      const tickSpacing = calculateTickSpacing(fee)
+      onChange({
+        fee: Math.floor(fee),
+        tickSpacing,
+        label: `${(fee / 10000).toFixed(4)}%`,
+        description: 'Custom fee tier'
+      })
+    }
+  }
+
+  const handleFeeSelect = (option: FeeOption) => {
+    onChange(option)
+    setShowCustomFee(false)
+  }
+
   return (
     <Container>
       <Label>Fee Tier</Label>
       <OptionsGrid>
-        {Object.entries(FEE_AMOUNT_DETAIL).map(([fee, { label, description }]) => (
+        {FEE_OPTIONS.map((option) => (
           <FeeButton
-            key={fee}
-            $selected={feeAmount === Number(fee)}
-            onClick={() => onChange(Number(fee) as FeeAmount)}
+            key={option.fee}
+            type="button"
+            $selected={feeAmount?.fee === option.fee}
+            onClick={() => handleFeeSelect(option)}
             disabled={disabled}
           >
-            <FeeText>{label}</FeeText>
-            <Description>{description}</Description>
+            <FeeText>{option.label}</FeeText>
+            <Description>{option.description}</Description>
           </FeeButton>
         ))}
+        <FeeButton
+          type="button"
+          $selected={showCustomFee}
+          onClick={() => setShowCustomFee(true)}
+          disabled={disabled}
+        >
+          <FeeText>Custom</FeeText>
+          <Description>Set your own fee tier</Description>
+        </FeeButton>
       </OptionsGrid>
+
+      {showCustomFee && (
+        <CustomFeeInput>
+          <Input
+            type="number"
+            value={customFee}
+            onChange={handleCustomFeeChange}
+            placeholder="Enter fee (e.g., 500 for 0.05%)"
+            disabled={disabled}
+          />
+          {customFee && (
+            <Description>
+              Tick spacing: {calculateTickSpacing(parseFloat(customFee) || 0)}
+            </Description>
+          )}
+        </CustomFeeInput>
+      )}
+
+      {error && <ErrorText>{error}</ErrorText>}
     </Container>
   )
 }

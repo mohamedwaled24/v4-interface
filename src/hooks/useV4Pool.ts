@@ -37,7 +37,7 @@ interface V4PoolValidation {
 interface CreatePoolResult {
   success: boolean
   error?: string
-  poolAddress?: string
+  poolId?: string
 }
 
 export function useV4Pool() {
@@ -71,9 +71,14 @@ export function useV4Pool() {
     return Object.keys(errors).length === 0
   }
 
-  const createPool = async (): Promise<CreatePoolResult> => {
-    if (!network?.v4FactoryAddress || !walletClient || !publicClient) {
+  const createPool = async (sqrtPriceX96: bigint): Promise<CreatePoolResult> => {
+    if (!network?.poolManagerAddress || !walletClient || !publicClient) {
       return { success: false, error: 'Network not configured properly' }
+    }
+
+    // Validate network
+    if (network.id !== 1301) { // Unichain Sepolia
+      return { success: false, error: 'Please switch to Unichain Sepolia network' }
     }
 
     if (!validatePool() || !poolState.fee) {
@@ -83,41 +88,50 @@ export function useV4Pool() {
     setIsCreating(true)
 
     try {
-      // Sort tokens to match Uniswap's ordering
-      const [token0, token1] = poolState.token0!.address.toLowerCase() < poolState.token1!.address.toLowerCase()
-        ? [poolState.token0!, poolState.token1!]
-        : [poolState.token1!, poolState.token0!]
-
       // Get the wallet's address
       const [address] = await walletClient.getAddresses()
 
-      // Prepare the transaction
-      const { request } = await publicClient.simulateContract({
-        address: network.v4FactoryAddress as `0x${string}`,
-        abi: V4_FACTORY_ABI,
-        functionName: 'createPool',
+      // Sort tokens to match Uniswap's ordering
+      const [token0, token1] = poolState.token0!.address.toLowerCase() < poolState.token1!.address.toLowerCase()
+        ? [poolState.token0!, poolState.token1!] 
+        : [poolState.token1!, poolState.token0!]
+
+      // Initialize pool
+      const { request: initRequest } = await publicClient.simulateContract({
+        address: network.poolManagerAddress as `0x${string}`,
+        abi: POOL_MANAGER_ABI,
+        functionName: 'initialize',
         args: [
-          token0.address as `0x${string}`,
-          token1.address as `0x${string}`,
-          poolState.hookAddress as `0x${string}`,
-          BigInt(poolState.fee.fee),
-          BigInt(poolState.fee.tickSpacing),
+          {
+            currency0: token0.address as `0x${string}`,
+            currency1: token1.address as `0x${string}`,
+            fee: poolState.fee.fee,
+            tickSpacing: poolState.fee.tickSpacing,
+            hooks: poolState.hookAddress
+          },
+          sqrtPriceX96
         ],
         account: address,
       })
 
-      // Send the transaction
-      const hash = await walletClient.writeContract(request)
+      // Send the initialization transaction
+      const initHash = await walletClient.writeContract(initRequest)
+      const initReceipt = await publicClient.waitForTransactionReceipt({ hash: initHash })
 
-      // Wait for the transaction to be mined
-      const receipt = await publicClient.waitForTransactionReceipt({ hash })
+      // Get the pool ID from the Initialize event
+      const initEvent = initReceipt.logs.find(
+        (log: { topics: string[] }) => log.topics[0] === publicClient.interface.getEvent('Initialize')?.topicHash
+      )
+      
+      if (!initEvent) {
+        throw new Error('Failed to get pool ID from initialization event')
+      }
 
-      // Get the pool address from the logs (you'll need to implement this based on the actual event structure)
-      const poolAddress = '' // TODO: Extract from logs
+      const poolId = initEvent.topics[1]
 
       return {
         success: true,
-        poolAddress,
+        poolId,
       }
     } catch (error: any) {
       console.error('Error creating pool:', error)

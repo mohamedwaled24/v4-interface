@@ -180,9 +180,50 @@ export const theme = {
   textPrimary: colors.white,
   textSecondary: colors.gray300,
   textDisabled: colors.gray600,
+  fontSizes: {
+    small: '12px',
+    medium: '14px',
+    large: '16px',
+    h1: '32px',
+    h2: '24px',
+    h3: '20px',
+    h4: '18px',
+    h5: '16px',
+    h6: '14px',
+  },
+  fontWeights: {
+    light: 300,
+    regular: 400,
+    medium: 500,
+    semibold: 600,
+    bold: 700,
+  },
+  borderRadius: {
+    small: '4px',
+    medium: '8px',
+    large: '12px',
+    round: '9999px',
+  },
+  opacities: {
+    hover: 0.8,
+    pressed: 0.6,
+    disabled: 0.4,
+  },
+  shadows: {
+    small: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    medium: '0 4px 8px rgba(0, 0, 0, 0.1)',
+    large: '0 8px 16px rgba(0, 0, 0, 0.1)',
+  },
   radii,
+  transition: transitions,
   fonts: {
     body: 'Inter, sans-serif',
   },
-  transition: transitions
+  breakpoints: {
+    xs: '0px',
+    sm: '600px',
+    md: '960px',
+    lg: '1280px',
+    xl: '1920px',
+  },
 }

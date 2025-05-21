@@ -22,9 +22,9 @@ const Input = styled.input<{ hasError?: boolean }>`
   width: 100%;
   padding: 16px;
   border-radius: 12px;
-  border: 1px solid ${({ hasError, theme }) => (hasError ? theme.critical : theme.backgroundOutline)};
-  background: ${({ theme }) => theme.backgroundInteractive};
-  color: ${({ theme }) => theme.textPrimary};
+  border: 1px solid ${({ hasError, theme }) => (hasError ? theme.colors.critical : theme.colors.backgroundOutline)};
+  background: ${({ theme }) => theme.colors.backgroundInteractive};
+  color: ${({ theme }) => theme.colors.neutral1};
   font-size: 16px;
   transition: border-color 0.2s ease;
   pointer-events: auto !important;
@@ -34,16 +34,17 @@ const Input = styled.input<{ hasError?: boolean }>`
   -ms-user-select: text !important;
 
   &:hover {
-    border-color: ${({ hasError, theme }) => (hasError ? theme.critical : theme.backgroundOutline)};
+    border-color: ${({ hasError, theme }) => (hasError ? theme.colors.critical : theme.colors.backgroundOutline)};
   }
 
   &:focus {
     outline: none;
-    border-color: ${({ hasError, theme }) => (hasError ? theme.critical : theme.accentActive)};
+    border-color: ${({ hasError, theme }) => (hasError ? theme.colors.critical : theme.colors.accentAction)};
   }
 
   &::placeholder {
-    color: ${({ theme }) => theme.textSecondary};
+    color: ${({ theme }) => theme.colors.neutral1};
+    opacity: 0.5;
   }
 
   &:disabled {
@@ -53,7 +54,7 @@ const Input = styled.input<{ hasError?: boolean }>`
 `
 
 const ErrorMessage = styled.div`
-  color: ${({ theme }) => theme.critical};
+  color: ${({ theme }) => theme.colors.critical};
   font-size: 12px;
   margin-top: 4px;
 `

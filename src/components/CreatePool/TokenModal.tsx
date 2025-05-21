@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { Token } from '../../types'
 import { Search, X } from '../shared/icons'
-import tokenList from '../shared/tokens_list.json'
+import { UNICHAIN_SEPOLIA_TOKENS } from '../../constants/tokens'
 
 interface TokenModalProps {
   isOpen: boolean
@@ -99,8 +99,6 @@ const SearchIcon = styled(Search)`
   width: 20px;
   height: 20px;
 `
-
-
 
 const SectionHeader = styled.div`
   padding: 8px 20px;
@@ -213,22 +211,13 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
   const [filteredTokens, setFilteredTokens] = useState<Token[]>([])
   
   // Common tokens to show at the top
-  const commonTokenSymbols = ['ETH', 'USDC', 'USDT', 'WBTC', 'WETH']
+  const commonTokenSymbols = ['ETH', 'USDC']
   
   const [commonTokens, setCommonTokens] = useState<Token[]>([])
   
   useEffect(() => {
-    // Convert tokens from the JSON file to our Token type and filter for Ethereum mainnet (chainId = 1)
-    const tokens: Token[] = tokenList.tokens
-      .filter(token => token.chainId === 1) // Only include Ethereum mainnet tokens
-      .map(token => ({
-        address: token.address,
-        symbol: token.symbol,
-        name: token.name || token.symbol,
-        decimals: token.decimals || 18,
-        logoURI: token.logoURI,
-        chainId: 1 // Explicitly set chainId to 1 for all tokens
-      }))
+    // Use Unichain Sepolia tokens
+    const tokens: Token[] = UNICHAIN_SEPOLIA_TOKENS
     
     // Find common tokens
     const common = tokens.filter(token => commonTokenSymbols.includes(token.symbol))

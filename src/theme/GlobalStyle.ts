@@ -1,7 +1,7 @@
 import { createGlobalStyle } from 'styled-components'
-import { Theme } from '.'
+import { Theme } from './theme'
 
-export const GlobalStyle = createGlobalStyle<{ theme: Theme }>`
+export const GlobalStyle = createGlobalStyle`
   * {
     box-sizing: border-box;
   }
@@ -13,7 +13,7 @@ export const GlobalStyle = createGlobalStyle<{ theme: Theme }>`
     width: 100%;
     height: 100%;
     font-size: 16px;
-    font-family: ${({ theme }) => theme.fonts.body};
+    font-family: Inter, sans-serif;
     background-color: ${({ theme }) => theme.colors.background};
     color: ${({ theme }) => theme.colors.neutral1};
     overscroll-behavior: none;
