@@ -324,6 +324,7 @@ export function CreatePoolForm() {
     }
   }
 
+  // to check if pool exists so that it goes right to liquidity step isntead of initializing
   const checkPoolExists = async () => {
     try {
       const result = await initializePool()
