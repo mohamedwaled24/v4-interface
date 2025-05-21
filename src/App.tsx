@@ -1,17 +1,23 @@
 import React, { useState } from 'react'
 import styled, { ThemeProvider } from 'styled-components'
+import { ApolloProvider } from '@apollo/client'
 import { CreatePoolForm } from './components/CreatePool/CreatePoolForm'
 import { SwapForm } from './components/Swap/SwapForm'
 import { Header, NavType } from './components/shared/Header'
 import { GlobalStyle } from './theme/GlobalStyle'
-import { darkTheme } from './theme'
+import { theme } from './theme/theme'
+import Analytics from './components/Analytics/Analytics'
+import { client } from './apollo/client'
+import { WalletProvider } from './contexts/WalletContext'
+import { ToastContainer } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
 
 const AppWrapper = styled.div`
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: ${({ theme }) => theme.colors.background};
-  color: ${({ theme }) => theme.colors.neutral1};
+  background-color: ${({ theme }) => theme.colors.background};
+  color: ${({ theme }) => theme.textPrimary};
 `
 
 const ContentWrapper = styled.div`
@@ -50,24 +56,21 @@ export function App() {
   const [activeNav, setActiveNav] = useState<NavType>(NavType.TRADE)
   
   return (
-    <ThemeProvider theme={darkTheme}>
-      <GlobalStyle />
-      <AppWrapper>
-        <Header activeNav={activeNav} onNavChange={setActiveNav} />
-        <ContentWrapper>
-          {activeNav === NavType.TRADE && <SwapForm />}
-          {activeNav === NavType.POOL && <CreatePoolForm />}
-          {activeNav === NavType.EXPLORE && (
-            <ExplorePlaceholder>
-              <PlaceholderTitle>Explore Coming Soon</PlaceholderTitle>
-              <PlaceholderText>
-                This feature is currently under development. You will be able to explore
-                v4 pools, hooks, and other components from this section.
-              </PlaceholderText>
-            </ExplorePlaceholder>
-          )}
-        </ContentWrapper>
-      </AppWrapper>
-    </ThemeProvider>
+    <WalletProvider>
+      <ApolloProvider client={client}>
+        <ThemeProvider theme={theme}>
+          <GlobalStyle />
+          <ToastContainer position="top-right" autoClose={5000} />
+          <AppWrapper>
+            <Header activeNav={activeNav} onNavChange={setActiveNav} />
+            <ContentWrapper>
+              {activeNav === NavType.TRADE && <SwapForm />}
+              {activeNav === NavType.POOL && <CreatePoolForm />}
+              {activeNav === NavType.EXPLORE && <Analytics />}
+            </ContentWrapper>
+          </AppWrapper>
+        </ThemeProvider>
+      </ApolloProvider>
+    </WalletProvider>
   )
 }

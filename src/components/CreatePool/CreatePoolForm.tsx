@@ -1,15 +1,20 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
 import { TokenSelector } from './TokenSelector'
-import { FeeSelector, FEE_OPTIONS } from './FeeSelector'
+import { FeeSelector, FeeOption } from './FeeSelector'
 import { HookInput } from './HookInput'
-import { NetworkSelector } from '../shared/NetworkSelector'
 import { ResetButton } from '../shared/ResetButton'
 import { Info } from '../shared/icons'
-import { useV4Pool } from '../../hooks/useV4Pool'
+import { useInitializePool } from '../../hooks/useInitializePool'
 import { useWallet } from '../../hooks/useWallet'
 import PriceRangeSelector from './PriceRangeSelector'
 import DepositAmountInputs from './DepositAmountInputs'
+import { Tooltip } from '../shared/Tooltip'
+import { toast } from 'react-toastify'
+import { createPublicClient, http } from 'viem'
+import { unichainSepolia } from 'viem/chains'
+import { CONTRACTS } from '../../constants/contracts'
+
 
 const Container = styled.div`
   display: flex;
@@ -247,7 +252,7 @@ interface ValidationErrors {
 interface PoolState {
   token0: Token | null
   token1: Token | null
-  fee: number
+  fee: FeeOption
   hookAddress: string
 }
 
@@ -260,42 +265,127 @@ export function CreatePoolForm() {
   const [maxPrice, setMaxPrice] = useState('')
   const [token0Amount, setToken0Amount] = useState('')
   const [token1Amount, setToken1Amount] = useState('')
+  const [poolId, setPoolId] = useState<string | null>(null)
   
   const { isConnected, connectWallet } = useWallet()
   const {
     poolState,
     validation,
-    isCreating,
-    createPool,
+    isInitializing,
+    initializePool,
     updateToken0,
     updateToken1,
     updateFee,
     updateHook,
+    updateSqrtPriceX96,
     validatePool
-  } = useV4Pool()
+  } = useInitializePool()
 
   const canProceedToStep2 = poolState.token0 && poolState.token1 && poolState.fee && 
     !validation.token0Error && !validation.token1Error
 
+  const getPoolId = async () => {
+    try {
+      const publicClient = createPublicClient({
+        chain: unichainSepolia,
+        transport: http()
+      })
+
+      // Get pool ID from the PoolManager contract
+      const poolId = await publicClient.readContract({
+        address: CONTRACTS[1301].PoolManager as `0x${string}`,
+        abi: [{
+          name: 'getPoolId',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [
+            { name: 'currency0', type: 'address' },
+            { name: 'currency1', type: 'address' },
+            { name: 'fee', type: 'uint24' },
+            { name: 'tickSpacing', type: 'int24' },
+            { name: 'hooks', type: 'address' }
+          ],
+          outputs: [{ type: 'bytes32' }]
+        }],
+        functionName: 'getPoolId',
+        args: [
+          poolState.token0?.address as `0x${string}`,
+          poolState.token1?.address as `0x${string}`,
+          poolState.fee.fee,
+          poolState.fee.tickSpacing,
+          poolState.hookAddress as `0x${string}`
+        ]
+      })
+
+      return poolId
+    } catch (error) {
+      console.error('Error getting pool ID:', error)
+      return null
+    }
+  }
+
+  // to check if pool exists so that it goes right to liquidity step isntead of initializing
+  const checkPoolExists = async () => {
+    try {
+      const result = await initializePool()
+      if (result.error?.includes('PoolAlreadyInitialized')) {
+        // Pool exists, get the pool ID from the error message or contract
+        const poolId = result.poolId || await getPoolId()
+        if (poolId) {
+          setPoolId(poolId)
+          setCurrentStep(3) // Skip to liquidity step
+          toast.info('Pool already exists. You can add liquidity to it.')
+          return true
+        }
+      }
+      return false
+    } catch (error) {
+      console.error('Error checking pool:', error)
+      return false
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (currentStep === 1 && canProceedToStep2) {
+      // Simply move to step 2 without checking pool existence
       setCurrentStep(2)
     } else if (currentStep === 2) {
       setIsLoading(true)
       try {
-        // In a real implementation, we would pass the price range and deposit amounts to createPool
-        // Using the state variables: isFullRange, minPrice, maxPrice, token0Amount, token1Amount
-        console.log('Creating pool with:', { isFullRange, minPrice, maxPrice, token0Amount, token1Amount })
-        const result = await createPool()
-        if (result.success) {
-          // Show success message or redirect
-          console.log('Pool created successfully:', result.poolAddress)
+        // Initialize pool
+        const result = await initializePool()
+        console.log('Pool initialization result:', result)
+
+        if (result.success && result.poolId) {
+          console.log('Pool created successfully:', result.poolId)
+          setPoolId(result.poolId)
+          setCurrentStep(3) // Move to liquidity step
+          toast.success('Pool created successfully!')
         } else {
-          console.error('Failed to create pool:', result.error)
+          console.error('Failed to create pool:', result)
+          if (result.error?.includes('PoolAlreadyInitialized')) {
+            // Pool exists, get the pool ID and skip to liquidity step
+            const poolId = result.poolId || await getPoolId()
+            setPoolId(poolId)
+            setCurrentStep(3)
+            toast.info('Pool already exists. You can add liquidity to it.')
+          } else {
+            toast.error('Failed to create pool: ' + (result.error || 'Unknown error'))
+          }
         }
       } catch (error) {
         console.error('Error creating pool:', error)
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+        if (errorMessage.includes('PoolAlreadyInitialized')) {
+          // Pool exists, get the pool ID and skip to liquidity step
+          const poolId = await getPoolId()
+          setPoolId(poolId)
+          setCurrentStep(3)
+          toast.info('Pool already exists. You can add liquidity to it.')
+        } else {
+          toast.error('Error creating pool: ' + errorMessage)
+        }
       } finally {
         setIsLoading(false)
       }
@@ -310,13 +400,13 @@ export function CreatePoolForm() {
     setMaxPrice('')
     setToken0Amount('')
     setToken1Amount('')
-    // Other state reset would happen in the useV4Pool hook
+    setPoolId(null)
   }
 
   const handleHookCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setShowHookInput(e.target.checked)
     if (!e.target.checked) {
-      updateHook('')
+      updateHook("0x0000000000000000000000000000000000000000")
     }
   }
   
@@ -363,7 +453,7 @@ export function CreatePoolForm() {
         <Steps>
           <Step 
             $active={currentStep === 1}
-            onClick={() => currentStep === 2 && setCurrentStep(1)}
+            onClick={() => currentStep > 1 && setCurrentStep(1)}
           >
             <StepNumber $active={currentStep === 1}>1</StepNumber>
             <StepContent>
@@ -371,11 +461,21 @@ export function CreatePoolForm() {
               <StepDescription>Choose the tokens and fee tier</StepDescription>
             </StepContent>
           </Step>
-          <Step $active={currentStep === 2}>
+          <Step 
+            $active={currentStep === 2}
+            onClick={() => currentStep > 2 && setCurrentStep(2)}
+          >
             <StepNumber $active={currentStep === 2}>2</StepNumber>
             <StepContent>
-              <StepTitle $active={currentStep === 2}>Set price range and deposit amounts</StepTitle>
-              <StepDescription>Set your price range and deposit tokens</StepDescription>
+              <StepTitle $active={currentStep === 2}>Initialize pool</StepTitle>
+              <StepDescription>Create the pool with initial price</StepDescription>
+            </StepContent>
+          </Step>
+          <Step $active={currentStep === 3}>
+            <StepNumber $active={currentStep === 3}>3</StepNumber>
+            <StepContent>
+              <StepTitle $active={currentStep === 3}>Add liquidity</StepTitle>
+              <StepDescription>Set price range and deposit tokens</StepDescription>
             </StepContent>
           </Step>
         </Steps>
@@ -394,13 +494,13 @@ export function CreatePoolForm() {
                 <TokenSelectors>
                   <TokenSelector
                     label="Token 1"
-                    token={poolState.token0}
+                    token={poolState.token0 || null}
                     onChange={updateToken0}
                     error={validation.token0Error}
                   />
                   <TokenSelector
                     label="Token 2"
-                    token={poolState.token1}
+                    token={poolState.token1 || null}
                     onChange={updateToken1}
                     error={validation.token1Error}
                   />
@@ -416,7 +516,9 @@ export function CreatePoolForm() {
                   <CheckboxLabel htmlFor="addHook">
                     Add a Hook (Advanced)
                   </CheckboxLabel>
-                  <StyledInfoIcon title="Hooks allow custom logic to be executed during swaps" />
+                  <Tooltip content="Hooks allow custom logic to be executed during swaps">
+                    <StyledInfoIcon />
+                  </Tooltip>
                 </CheckboxRow>
 
                 <div>
@@ -428,7 +530,12 @@ export function CreatePoolForm() {
                   </SectionHeader>
                   <FeeSelector
                     feeAmount={poolState.fee}
-                    onChange={updateFee}
+                    onChange={(fee) => {
+                      updateFee(fee)
+                      // Prevent form submission when selecting fee
+                      e?.preventDefault()
+                    }}
+                    error={undefined}
                   />
                 </div>
 
@@ -442,12 +549,29 @@ export function CreatePoolForm() {
                   </HookContainer>
                 )}
               </FormSection>
+            ) : currentStep === 2 ? (
+              <FormSection>
+                <SectionHeader>
+                  <SectionTitle>Initialize Pool</SectionTitle>
+                  <SectionDescription>
+                    Create a new pool with the selected tokens and fee tier.
+                  </SectionDescription>
+                </SectionHeader>
+                
+                <div>
+                  <p>Token Pair: {poolState.token0?.symbol} / {poolState.token1?.symbol}</p>
+                  <p>Fee Tier: {((poolState.fee?.fee || 0) / 10000).toFixed(4)}%</p>
+                  {poolState.hookAddress !== "0x0000000000000000000000000000000000000000" && (
+                    <p>Hook: {poolState.hookAddress}</p>
+                  )}
+                </div>
+              </FormSection>
             ) : (
               <FormSection>
                 <SectionHeader>
-                  <SectionTitle>Set price range</SectionTitle>
+                  <SectionTitle>Add Liquidity</SectionTitle>
                   <SectionDescription>
-                    Select a price range for your position. The narrower the range, the higher the potential returns, but the more likely it is to fall outside the range.
+                    Set your price range and deposit tokens.
                   </SectionDescription>
                 </SectionHeader>
                 
@@ -457,29 +581,32 @@ export function CreatePoolForm() {
                   token1Symbol={poolState.token1?.symbol}
                 />
                 
-                <SectionHeader>
-                  <SectionTitle>Deposit tokens</SectionTitle>
-                  <SectionDescription>
-                    Specify the token amounts for your liquidity contribution.
-                  </SectionDescription>
-                </SectionHeader>
-                
                 <DepositAmountInputs 
-                  token0={poolState.token0}
-                  token1={poolState.token1}
+                  token0={poolState.token0 || null}
+                  token1={poolState.token1 || null}
                   token0Amount={token0Amount}
                   token1Amount={token1Amount}
                   onToken0AmountChange={handleToken0AmountChange}
                   onToken1AmountChange={handleToken1AmountChange}
+                  tickLower={isFullRange ? -887272 : parseInt(minPrice)}
+                  tickUpper={isFullRange ? 887272 : parseInt(maxPrice)}
+                  currentPrice={poolState.sqrtPriceX96 || 79228162514264337593543950336n}
                 />
               </FormSection>
             )}
 
             <ActionButton 
               type="submit" 
-              disabled={currentStep === 1 ? !canProceedToStep2 : isLoading}
+              disabled={
+                currentStep === 1 ? !canProceedToStep2 : 
+                currentStep === 2 ? isLoading || isInitializing :
+                isLoading // For step 3
+              }
             >
-              {isLoading ? 'Creating...' : currentStep === 1 ? 'Continue' : 'Create Pool'}
+              {isLoading || isInitializing ? 'Processing...' : 
+               currentStep === 1 ? 'Continue' : 
+               currentStep === 2 ? 'Initialize Pool' :
+               'Add Liquidity'}
             </ActionButton>
           </Form>
         ) : (

@@ -24,13 +24,23 @@ export function useBalance(tokenAddress?: string) {
   const { publicClient, address } = useWallet()
 
   useEffect(() => {
-    if (!publicClient || !address || !tokenAddress) {
+    if (!publicClient || !address) {
       setBalance('')
       return
     }
 
     const fetchBalance = async () => {
       try {
+        // Handle native ETH
+        if (!tokenAddress || tokenAddress === '0x0000000000000000000000000000000000000000') {
+          const balance = await publicClient.getBalance({
+            address: address as `0x${string}`
+          })
+          setBalance(formatUnits(balance, 18))
+          return
+        }
+
+        // Handle ERC20 tokens
         const [balanceResult, decimalsResult] = await Promise.all([
           publicClient.readContract({
             address: tokenAddress as `0x${string}`,
