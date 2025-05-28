@@ -233,33 +233,80 @@ export function useWallet() {
     }
     
     try {
-      await window.ethereum!.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: `0x${networkId.toString(16)}` }],
-      });
-      return true;
-    } catch (error: any) {
-      if (error.code === 4902) {
-        // Chain not added to MetaMask
+      // First check if the network exists in our supported networks
+      const targetNetwork = SUPPORTED_NETWORKS.find(n => n.id === networkId);
+      if (!targetNetwork) {
+        throw new Error(`Network with ID ${networkId} is not supported`);
+      }
+      
+      console.log(`Attempting to switch to network: ${targetNetwork.name} (${networkId})`);
+      
+      try {
+        // Try to switch to the network
+        await window.ethereum!.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: `0x${networkId.toString(16)}` }],
+        });
+        
+        // Update state immediately instead of waiting for chainChanged event
         const network = SUPPORTED_NETWORKS.find(n => n.id === networkId);
         if (network) {
-          try {
-            await window.ethereum!.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: `0x${networkId.toString(16)}`,
-                chainName: network.name,
-                nativeCurrency: network.nativeCurrency,
-                rpcUrls: [network.rpcUrl],
-              }],
-            });
-            return true;
-          } catch (addError) {
-            console.error('Failed to add network:', addError);
-            throw addError;
-          }
+          const public_client = createPublicClient({
+            transport: http(network.rpcUrl),
+          });
+          
+          updateGlobalWalletState({
+            chainId: networkId,
+            network,
+            publicClient: public_client
+          });
         }
+        
+        return true;
+      } catch (switchError: any) {
+        // This error code indicates that the chain has not been added to MetaMask
+        if (switchError.code === 4902) {
+          console.log('Network not found in wallet, attempting to add it');
+          
+          await window.ethereum!.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: `0x${networkId.toString(16)}`,
+              chainName: targetNetwork.name,
+              nativeCurrency: targetNetwork.nativeCurrency,
+              rpcUrls: [targetNetwork.rpcUrl],
+              blockExplorerUrls: targetNetwork.blockExplorers ? 
+                [targetNetwork.blockExplorers.default.url] : 
+                undefined
+            }],
+          });
+          
+          // After adding, try switching again
+          await window.ethereum!.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: `0x${networkId.toString(16)}` }],
+          });
+          
+          // Update state immediately
+          if (targetNetwork) {
+            const public_client = createPublicClient({
+              transport: http(targetNetwork.rpcUrl),
+            });
+            
+            updateGlobalWalletState({
+              chainId: networkId,
+              network: targetNetwork,
+              publicClient: public_client
+            });
+          }
+          
+          return true;
+        }
+        
+        // Other errors
+        throw switchError;
       }
+    } catch (error) {
       console.error('Failed to switch network:', error);
       throw error;
     }

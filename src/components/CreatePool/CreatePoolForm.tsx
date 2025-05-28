@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { TokenSelector } from './TokenSelector'
 import { FeeSelector, FeeOption } from './FeeSelector'
@@ -7,14 +7,16 @@ import { ResetButton } from '../shared/ResetButton'
 import { Info } from '../shared/icons'
 import { useInitializePool } from '../../hooks/useInitializePool'
 import { useWallet } from '../../hooks/useWallet'
+import { useV4Position } from '../../hooks/useV4Position'
 import PriceRangeSelector from './PriceRangeSelector'
 import DepositAmountInputs from './DepositAmountInputs'
 import { Tooltip } from '../shared/Tooltip'
 import { toast } from 'react-toastify'
-import { createPublicClient, http } from 'viem'
-import { unichainSepolia } from 'viem/chains'
+import { parseUnits } from 'viem'
 import { CONTRACTS } from '../../constants/contracts'
-
+import { calculateTickSpacingFromFeeAmount } from '../Liquidity/utils'
+import { NetworkSelector } from '../shared/NetworkSelector'
+import { generatePoolId, checkPoolExistsWithStateView } from '../../utils/stateViewUtils';
 
 const Container = styled.div`
   display: flex;
@@ -60,11 +62,13 @@ const Title = styled.h1`
 
 const HeaderActions = styled.div`
   display: flex;
-  gap: 12px;
   align-items: center;
+  gap: 16px;
 `
 
-// ResetButton is now imported from shared components
+const StyledNetworkSelector = styled(NetworkSelector)`
+  margin-right: 8px;
+`
 
 const MainContent = styled.div`
   display: grid;
@@ -267,7 +271,7 @@ export function CreatePoolForm() {
   const [token1Amount, setToken1Amount] = useState('')
   const [poolId, setPoolId] = useState<string | null>(null)
   
-  const { isConnected, connectWallet } = useWallet()
+  const { isConnected, connectWallet, chainId, network } = useWallet()
   const {
     poolState,
     validation,
@@ -280,117 +284,230 @@ export function CreatePoolForm() {
     updateSqrtPriceX96,
     validatePool
   } = useInitializePool()
+  const { position, addLiquidity } = useV4Position()
+
+  useEffect(() => {
+    if (chainId) {
+      console.log(`Network changed to: ${chainId}`);
+      setCurrentStep(1);
+      setPoolId(null);
+    }
+  }, [chainId]);
 
   const canProceedToStep2 = poolState.token0 && poolState.token1 && poolState.fee && 
     !validation.token0Error && !validation.token1Error
 
   const getPoolId = async () => {
     try {
-      const publicClient = createPublicClient({
-        chain: unichainSepolia,
-        transport: http()
-      })
+      if (!chainId || !CONTRACTS[chainId as keyof typeof CONTRACTS]) {
+        console.error('Unsupported chain ID:', chainId);
+        toast.error(`Network ${chainId} is not supported for pool creation`);
+        return null;
+      }
 
-      // Get pool ID from the PoolManager contract
-      const poolId = await publicClient.readContract({
-        address: CONTRACTS[1301].PoolManager as `0x${string}`,
-        abi: [{
-          name: 'getPoolId',
-          type: 'function',
-          stateMutability: 'view',
-          inputs: [
-            { name: 'currency0', type: 'address' },
-            { name: 'currency1', type: 'address' },
-            { name: 'fee', type: 'uint24' },
-            { name: 'tickSpacing', type: 'int24' },
-            { name: 'hooks', type: 'address' }
-          ],
-          outputs: [{ type: 'bytes32' }]
-        }],
-        functionName: 'getPoolId',
-        args: [
-          poolState.token0?.address as `0x${string}`,
-          poolState.token1?.address as `0x${string}`,
-          poolState.fee.fee,
-          poolState.fee.tickSpacing,
-          poolState.hookAddress as `0x${string}`
-        ]
-      })
+      console.log(`Getting pool ID for tokens on network ${chainId}:`, {
+        token0: poolState.token0?.address,
+        token1: poolState.token1?.address,
+        fee: poolState.fee.fee,
+        tickSpacing: poolState.fee.tickSpacing,
+        hookAddress: poolState.hookAddress
+      });
 
-      return poolId
+      const poolId = generatePoolId({
+        currency0: poolState.token0?.address || '',
+        currency1: poolState.token1?.address || '',
+        fee: poolState.fee.fee,
+        tickSpacing: poolState.fee.tickSpacing,
+        hooks: poolState.hookAddress || '0x0000000000000000000000000000000000000000'
+      });
+
+      console.log(`Pool ID generated: ${poolId}`);
+      return poolId;
     } catch (error) {
-      console.error('Error getting pool ID:', error)
-      return null
+      console.error('Error getting pool ID:', error);
+      return null;
     }
-  }
+  };
 
-  // to check if pool exists so that it goes right to liquidity step isntead of initializing
   const checkPoolExists = async () => {
     try {
-      const result = await initializePool()
-      if (result.error?.includes('PoolAlreadyInitialized')) {
-        // Pool exists, get the pool ID from the error message or contract
-        const poolId = result.poolId || await getPoolId()
-        if (poolId) {
-          setPoolId(poolId)
-          setCurrentStep(3) // Skip to liquidity step
-          toast.info('Pool already exists. You can add liquidity to it.')
-          return true
-        }
+      if (!chainId || !CONTRACTS[chainId as keyof typeof CONTRACTS]) {
+        console.error('Unsupported chain ID:', chainId);
+        toast.error(`Network ${chainId} is not supported for pool operations`);
+        return { exists: false, poolId: null };
       }
-      return false
+
+      const poolId = await getPoolId();
+      if (!poolId) {
+        console.error('Failed to get pool ID');
+        return { exists: false, poolId: null };
+      }
+
+      const rpcUrl = network?.rpcUrl || 'https://unichain-sepolia-rpc.publicnode.com';
+      return await checkPoolExistsWithStateView(chainId, rpcUrl, poolId);
     } catch (error) {
-      console.error('Error checking pool:', error)
-      return false
+      console.error('Error checking if pool exists:', error);
+      return { exists: false, poolId: null };
     }
-  }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (currentStep === 1 && canProceedToStep2) {
-      // Simply move to step 2 without checking pool existence
+      const calculatedTickSpacing = calculateTickSpacingFromFeeAmount(poolState.fee?.fee || 0);
+      
+      console.log(`Step 1 Form Values (${new Date().toISOString()}):`, {
+        token0: {
+          address: poolState.token0?.address,
+          symbol: poolState.token0?.symbol,
+          decimals: poolState.token0?.decimals
+        },
+        token1: {
+          address: poolState.token1?.address,
+          symbol: poolState.token1?.symbol,
+          decimals: poolState.token1?.decimals
+        },
+        fee: {
+          fee: poolState.fee?.fee,
+          tickSpacing: poolState.fee?.tickSpacing,
+          calculatedTickSpacing: calculatedTickSpacing,
+          formattedFee: `${((poolState.fee?.fee || 0) / 10000).toFixed(4)}%`
+        },
+        hookAddress: poolState.hookAddress,
+        hookEnabled: showHookInput
+      });
+      
       setCurrentStep(2)
     } else if (currentStep === 2) {
-      setIsLoading(true)
+      const calculatedTickSpacing = calculateTickSpacingFromFeeAmount(poolState.fee?.fee || 0);
+      
+      console.log(`Step 2 Form Values (${new Date().toISOString()}):`, {
+        tokens: {
+          token0: {
+            address: poolState.token0?.address,
+            symbol: poolState.token0?.symbol,
+            decimals: poolState.token0?.decimals,
+            amount: token0Amount
+          },
+          token1: {
+            address: poolState.token1?.address,
+            symbol: poolState.token1?.symbol,
+            decimals: poolState.token1?.decimals,
+            amount: token1Amount
+          }
+        },
+        fee: {
+          fee: poolState.fee?.fee,
+          tickSpacing: poolState.fee?.tickSpacing,
+          calculatedTickSpacing: calculatedTickSpacing,
+          formattedFee: `${((poolState.fee?.fee || 0) / 10000).toFixed(4)}%`
+        },
+        priceRange: {
+          isFullRange,
+          minPrice: isFullRange ? 'Min (-887272)' : minPrice,
+          maxPrice: isFullRange ? 'Max (887272)' : maxPrice,
+          tickLower: isFullRange ? -887272 : parseInt(minPrice || '0'),
+          tickUpper: isFullRange ? 887272 : parseInt(maxPrice || '0')
+        },
+        hookAddress: poolState.hookAddress,
+        hookEnabled: showHookInput,
+        poolId
+      });
+      
+      setIsLoading(true);
       try {
-        // Initialize pool
-        const result = await initializePool()
-        console.log('Pool initialization result:', result)
-
-        if (result.success && result.poolId) {
-          console.log('Pool created successfully:', result.poolId)
-          setPoolId(result.poolId)
-          setCurrentStep(3) // Move to liquidity step
-          toast.success('Pool created successfully!')
+        const { exists, poolId: existingPoolId } = await checkPoolExists();
+        console.log('Pool existence check result:', { exists, poolId: existingPoolId });
+        
+        if (exists && existingPoolId) {
+          setPoolId(existingPoolId);
+          toast.info('Pool exists. Adding liquidity...');
+          
+          // Add liquidity to existing pool using the useV4Position hook
+          await addLiquidityToPool(existingPoolId);
+          
+          toast.success('Liquidity added successfully!');
         } else {
-          console.error('Failed to create pool:', result)
-          if (result.error?.includes('PoolAlreadyInitialized')) {
-            // Pool exists, get the pool ID and skip to liquidity step
-            const poolId = result.poolId || await getPoolId()
-            setPoolId(poolId)
-            setCurrentStep(3)
-            toast.info('Pool already exists. You can add liquidity to it.')
+          toast.info('Pool does not exist. Creating pool first...');
+          
+          const result = await initializePool();
+          console.log('Pool initialization result:', result);
+          
+          if (result.success && result.poolId) {
+            console.log('Pool created successfully:', result.poolId);
+            setPoolId(result.poolId);
+            
+            // Now add liquidity to the newly created pool
+            await addLiquidityToPool(result.poolId);
+            
+            toast.success('Pool created and liquidity added successfully!');
           } else {
-            toast.error('Failed to create pool: ' + (result.error || 'Unknown error'))
+            console.error('Failed to create pool:', result);
+            toast.error('Failed to create pool: ' + (result.error || 'Unknown error'));
           }
         }
       } catch (error) {
-        console.error('Error creating pool:', error)
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-        if (errorMessage.includes('PoolAlreadyInitialized')) {
-          // Pool exists, get the pool ID and skip to liquidity step
-          const poolId = await getPoolId()
-          setPoolId(poolId)
-          setCurrentStep(3)
-          toast.info('Pool already exists. You can add liquidity to it.')
-        } else {
-          toast.error('Error creating pool: ' + errorMessage)
-        }
+        console.error('Error in liquidity addition process:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        toast.error('Error: ' + errorMessage);
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
     }
   }
+
+  // Function to add liquidity to a pool using the useV4Position hook
+  const addLiquidityToPool = async (poolId: string) => {
+    if (!poolState.token0 || !poolState.token1) {
+      toast.error('Missing token information');
+      return;
+    }
+
+    try {
+      // Calculate tick range
+      const tickLower = isFullRange ? -887272 : parseInt(minPrice || '0');
+      const tickUpper = isFullRange ? 887272 : parseInt(maxPrice || '0');
+      
+      console.log('Adding liquidity with params:', {
+        poolId,
+        token0: poolState.token0,
+        token1: poolState.token1,
+        fee: poolState.fee.fee,
+        tickLower,
+        tickUpper,
+        token0Amount,
+        token1Amount
+      });
+      
+      // Call the addLiquidity function from the useV4Position hook
+      const result = await addLiquidity({
+        token0: {
+          address: poolState.token0.address,
+          decimals: poolState.token0.decimals,
+          amount: token0Amount
+        },
+        token1: {
+          address: poolState.token1.address,
+          decimals: poolState.token1.decimals,
+          amount: token1Amount
+        },
+        fee: poolState.fee.fee,
+        tickLower,
+        tickUpper,
+        hookAddress: poolState.hookAddress
+      });
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to add liquidity');
+      }
+      
+      console.log('Position created with transaction hash:', result.hash);
+      return result.hash;
+    } catch (error) {
+      console.error('Error adding liquidity:', error);
+      throw error;
+    }
+  };
 
   const handleReset = () => {
     setCurrentStep(1)
@@ -440,6 +557,7 @@ export function CreatePoolForm() {
       <Header>
         <Title>New position</Title>
         <HeaderActions>
+          <StyledNetworkSelector />
           <ResetButton onClickReset={handleReset} isDisabled={false} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span>v4 position</span>
@@ -461,20 +579,10 @@ export function CreatePoolForm() {
               <StepDescription>Choose the tokens and fee tier</StepDescription>
             </StepContent>
           </Step>
-          <Step 
-            $active={currentStep === 2}
-            onClick={() => currentStep > 2 && setCurrentStep(2)}
-          >
+          <Step $active={currentStep === 2}>
             <StepNumber $active={currentStep === 2}>2</StepNumber>
             <StepContent>
-              <StepTitle $active={currentStep === 2}>Initialize pool</StepTitle>
-              <StepDescription>Create the pool with initial price</StepDescription>
-            </StepContent>
-          </Step>
-          <Step $active={currentStep === 3}>
-            <StepNumber $active={currentStep === 3}>3</StepNumber>
-            <StepContent>
-              <StepTitle $active={currentStep === 3}>Add liquidity</StepTitle>
+              <StepTitle $active={currentStep === 2}>Add liquidity</StepTitle>
               <StepDescription>Set price range and deposit tokens</StepDescription>
             </StepContent>
           </Step>
@@ -533,7 +641,7 @@ export function CreatePoolForm() {
                     onChange={(fee) => {
                       updateFee(fee)
                       // Prevent form submission when selecting fee
-                      e?.preventDefault()
+                      // e?.preventDefault()
                     }}
                     error={undefined}
                   />
@@ -548,23 +656,6 @@ export function CreatePoolForm() {
                     />
                   </HookContainer>
                 )}
-              </FormSection>
-            ) : currentStep === 2 ? (
-              <FormSection>
-                <SectionHeader>
-                  <SectionTitle>Initialize Pool</SectionTitle>
-                  <SectionDescription>
-                    Create a new pool with the selected tokens and fee tier.
-                  </SectionDescription>
-                </SectionHeader>
-                
-                <div>
-                  <p>Token Pair: {poolState.token0?.symbol} / {poolState.token1?.symbol}</p>
-                  <p>Fee Tier: {((poolState.fee?.fee || 0) / 10000).toFixed(4)}%</p>
-                  {poolState.hookAddress !== "0x0000000000000000000000000000000000000000" && (
-                    <p>Hook: {poolState.hookAddress}</p>
-                  )}
-                </div>
               </FormSection>
             ) : (
               <FormSection>
@@ -599,13 +690,11 @@ export function CreatePoolForm() {
               type="submit" 
               disabled={
                 currentStep === 1 ? !canProceedToStep2 : 
-                currentStep === 2 ? isLoading || isInitializing :
-                isLoading // For step 3
+                isLoading 
               }
             >
-              {isLoading || isInitializing ? 'Processing...' : 
+              {isLoading ? 'Processing...' : 
                currentStep === 1 ? 'Continue' : 
-               currentStep === 2 ? 'Initialize Pool' :
                'Add Liquidity'}
             </ActionButton>
           </Form>
