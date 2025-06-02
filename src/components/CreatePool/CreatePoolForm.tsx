@@ -10,6 +10,7 @@ import { useWallet } from '../../hooks/useWallet'
 import { useV4Position } from '../../hooks/useV4Position'
 import PriceRangeSelector from './PriceRangeSelector'
 import DepositAmountInputs from './DepositAmountInputs'
+import ReviewModal from './ReviewModal'
 import { Tooltip } from '../shared/Tooltip'
 import { toast } from 'react-toastify'
 import { parseUnits } from 'viem'
@@ -270,6 +271,12 @@ export function CreatePoolForm() {
   const [token0Amount, setToken0Amount] = useState('')
   const [token1Amount, setToken1Amount] = useState('')
   const [poolId, setPoolId] = useState<string | null>(null)
+  const [showReviewModal, setShowReviewModal] = useState(false)
+  const [poolInfo, setPoolInfo] = useState<{
+    sqrtPriceX96: string;
+    liquidity: string;
+    tick: number;
+  } | null>(null)
   
   const { isConnected, connectWallet, chainId, network } = useWallet()
   const {
@@ -284,7 +291,9 @@ export function CreatePoolForm() {
     updateSqrtPriceX96,
     validatePool
   } = useInitializePool()
-  const { position, addLiquidity } = useV4Position()
+  
+  // Updated hook usage - separate functions for calculation and execution
+  const { calculateRequiredAmounts, executeTransaction, isAddingLiquidity } = useV4Position()
 
   useEffect(() => {
     if (chainId) {
@@ -379,84 +388,97 @@ export function CreatePoolForm() {
       
       setCurrentStep(2)
     } else if (currentStep === 2) {
-      const calculatedTickSpacing = calculateTickSpacingFromFeeAmount(poolState.fee?.fee || 0);
-      
-      console.log(`Step 2 Form Values (${new Date().toISOString()}):`, {
-        tokens: {
-          token0: {
-            address: poolState.token0?.address,
-            symbol: poolState.token0?.symbol,
-            decimals: poolState.token0?.decimals,
-            amount: token0Amount
-          },
-          token1: {
-            address: poolState.token1?.address,
-            symbol: poolState.token1?.symbol,
-            decimals: poolState.token1?.decimals,
-            amount: token1Amount
-          }
-        },
-        fee: {
-          fee: poolState.fee?.fee,
-          tickSpacing: poolState.fee?.tickSpacing,
-          calculatedTickSpacing: calculatedTickSpacing,
-          formattedFee: `${((poolState.fee?.fee || 0) / 10000).toFixed(4)}%`
-        },
-        priceRange: {
-          isFullRange,
-          minPrice: isFullRange ? 'Min (-887272)' : minPrice,
-          maxPrice: isFullRange ? 'Max (887272)' : maxPrice,
-          tickLower: isFullRange ? -887272 : parseInt(minPrice || '0'),
-          tickUpper: isFullRange ? 887272 : parseInt(maxPrice || '0')
-        },
-        hookAddress: poolState.hookAddress,
-        hookEnabled: showHookInput,
-        poolId
-      });
-      
-      setIsLoading(true);
-      try {
-        const { exists, poolId: existingPoolId } = await checkPoolExists();
-        console.log('Pool existence check result:', { exists, poolId: existingPoolId });
-        
-        if (exists && existingPoolId) {
-          setPoolId(existingPoolId);
-          toast.info('Pool exists. Adding liquidity...');
-          
-          // Add liquidity to existing pool using the useV4Position hook
-          await addLiquidityToPool(existingPoolId);
-          
-          toast.success('Liquidity added successfully!');
-        } else {
-          toast.info('Pool does not exist. Creating pool first...');
-          
-          const result = await initializePool();
-          console.log('Pool initialization result:', result);
-          
-          if (result.success && result.poolId) {
-            console.log('Pool created successfully:', result.poolId);
-            setPoolId(result.poolId);
-            
-            // Now add liquidity to the newly created pool
-            await addLiquidityToPool(result.poolId);
-            
-            toast.success('Pool created and liquidity added successfully!');
-          } else {
-            console.error('Failed to create pool:', result);
-            toast.error('Failed to create pool: ' + (result.error || 'Unknown error'));
-          }
-        }
-      } catch (error) {
-        console.error('Error in liquidity addition process:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        toast.error('Error: ' + errorMessage);
-      } finally {
-        setIsLoading(false);
-      }
+      // Show review modal instead of executing transaction
+      setShowReviewModal(true);
     }
   }
 
-  // Function to add liquidity to a pool using the useV4Position hook
+  // Function to actually create the position (moved from handleSubmit to modal)
+  const handleCreatePosition = async () => {
+    if (!poolState.token0 || !poolState.token1) {
+      toast.error('Missing token information');
+      return;
+    }
+
+    const calculatedTickSpacing = calculateTickSpacingFromFeeAmount(poolState.fee?.fee || 0);
+    
+    console.log(`Creating Position (${new Date().toISOString()}):`, {
+      tokens: {
+        token0: {
+          address: poolState.token0?.address,
+          symbol: poolState.token0?.symbol,
+          decimals: poolState.token0?.decimals,
+          amount: token0Amount
+        },
+        token1: {
+          address: poolState.token1?.address,
+          symbol: poolState.token1?.symbol,
+          decimals: poolState.token1?.decimals,
+          amount: token1Amount
+        }
+      },
+      fee: {
+        fee: poolState.fee?.fee,
+        tickSpacing: poolState.fee?.tickSpacing,
+        calculatedTickSpacing: calculatedTickSpacing,
+        formattedFee: `${((poolState.fee?.fee || 0) / 10000).toFixed(4)}%`
+      },
+      priceRange: {
+        isFullRange,
+        minPrice: isFullRange ? 'Min (-887272)' : minPrice,
+        maxPrice: isFullRange ? 'Max (887272)' : maxPrice,
+        tickLower: isFullRange ? -887272 : parseInt(minPrice || '0'),
+        tickUpper: isFullRange ? 887272 : parseInt(maxPrice || '0')
+      },
+      hookAddress: poolState.hookAddress,
+      hookEnabled: showHookInput,
+      poolId
+    });
+    
+    setIsLoading(true);
+    try {
+      const { exists, poolId: existingPoolId } = await checkPoolExists();
+      console.log('Pool existence check result:', { exists, poolId: existingPoolId });
+      
+      if (exists && existingPoolId) {
+        setPoolId(existingPoolId);
+        toast.info('Pool exists. Adding liquidity...');
+        
+        // Add liquidity to existing pool using the useV4Position hook
+        await addLiquidityToPool(existingPoolId);
+        
+        toast.success('Liquidity added successfully!');
+        setShowReviewModal(false); // Close modal on success
+      } else {
+        toast.info('Pool does not exist. Creating pool first...');
+        
+        const result = await initializePool();
+        console.log('Pool initialization result:', result);
+        
+        if (result.success && result.poolId) {
+          console.log('Pool created successfully:', result.poolId);
+          setPoolId(result.poolId);
+          
+          // Now add liquidity to the newly created pool
+          await addLiquidityToPool(result.poolId);
+          
+          toast.success('Pool created and liquidity added successfully!');
+          setShowReviewModal(false); // Close modal on success
+        } else {
+          console.error('Failed to create pool:', result);
+          toast.error('Failed to create pool: ' + (result.error || 'Unknown error'));
+        }
+      }
+    } catch (error) {
+      console.error('Error in liquidity addition process:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast.error('Error: ' + errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Updated function to add liquidity to a pool using the new separated approach
   const addLiquidityToPool = async (poolId: string) => {
     if (!poolState.token0 || !poolState.token1) {
       toast.error('Missing token information');
@@ -464,7 +486,6 @@ export function CreatePoolForm() {
     }
 
     try {
-      // Calculate tick range
       const tickLower = isFullRange ? -887272 : parseInt(minPrice || '0');
       const tickUpper = isFullRange ? 887272 : parseInt(maxPrice || '0');
       
@@ -479,30 +500,39 @@ export function CreatePoolForm() {
         token1Amount
       });
       
-      // Call the addLiquidity function from the useV4Position hook
-      const result = await addLiquidity({
+      // Step 1: Calculate the required amounts
+      const calculationResult = await calculateRequiredAmounts({
         token0: {
           address: poolState.token0.address,
           decimals: poolState.token0.decimals,
-          amount: token0Amount
+          amount: token0Amount,
+          symbol: poolState.token0.symbol
         },
         token1: {
           address: poolState.token1.address,
           decimals: poolState.token1.decimals,
-          amount: token1Amount
+          amount: token1Amount,
+          symbol: poolState.token1.symbol
         },
         fee: poolState.fee.fee,
         tickLower,
         tickUpper,
         hookAddress: poolState.hookAddress
       });
+
+      if (!calculationResult.success) {
+        throw new Error(calculationResult.error || 'Failed to calculate required amounts');
+      }
+
+      // Step 2: Execute the transaction
+      const txResult = await executeTransaction(calculationResult);
       
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to add liquidity');
+      if (!txResult.success) {
+        throw new Error(txResult.error || 'Failed to add liquidity');
       }
       
-      console.log('Position created with transaction hash:', result.hash);
-      return result.hash;
+      console.log('Position created with transaction hash:', txResult.hash);
+      return txResult.hash;
     } catch (error) {
       console.error('Error adding liquidity:', error);
       throw error;
@@ -518,6 +548,8 @@ export function CreatePoolForm() {
     setToken0Amount('')
     setToken1Amount('')
     setPoolId(null)
+    setShowReviewModal(false)
+    setPoolInfo(null)
   }
 
   const handleHookCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -538,13 +570,91 @@ export function CreatePoolForm() {
     }
   }
   
-  const handleToken0AmountChange = (amount: string) => {
-    setToken0Amount(amount)
-  }
+  // Token0 onBlur - no calculation, just let user input freely
+  const handleToken0AmountBlur = () => {
+    // No calculation here - user can input any amount they want
+    console.log('Token0 blur - no calculation performed');
+  };
   
+  // Updated Token1 onBlur - use calculateRequiredAmounts instead of addLiquidity
+  const handleToken1AmountBlur = async () => {
+    if (!poolState.token0 || !poolState.token1 || !token0Amount || !token1Amount) {
+      console.log('Missing required data for calculation:', {
+        token0: !!poolState.token0,
+        token1: !!poolState.token1,
+        token0Amount: !!token0Amount,
+        token1Amount: !!token1Amount
+      });
+      return;
+    }
+  
+    try {
+      const tickLower = isFullRange ? -887272 : parseInt(minPrice || '0');
+      const tickUpper = isFullRange ? 887272 : parseInt(maxPrice || '0');
+  
+      console.log('Calculating requirements based on user inputs:', {
+        token0Amount,
+        token1Amount,
+        tickLower,
+        tickUpper
+      });
+
+      // Use calculateRequiredAmounts for fast calculation (no simulation)
+      const result = await calculateRequiredAmounts({
+        token0: {
+          address: poolState.token0.address,
+          decimals: poolState.token0.decimals,
+          amount: token0Amount, // Use user's input
+          symbol: poolState.token0.symbol
+        },
+        token1: {
+          address: poolState.token1.address,
+          decimals: poolState.token1.decimals,
+          amount: token1Amount, // Use user's input
+          symbol: poolState.token1.symbol
+        },
+        fee: poolState.fee.fee,
+        tickLower,
+        tickUpper,
+        hookAddress: poolState.hookAddress
+      });
+  
+      if (result.success && result.requiredAmount0 && result.requiredAmount1) {
+        console.log('Updating both fields with calculated requirements:', {
+          requiredAmount0: result.requiredAmount0,
+          requiredAmount1: result.requiredAmount1
+        });
+        
+        // Update BOTH fields with the calculated requirements
+        setToken0Amount(result.requiredAmount0);
+        setToken1Amount(result.requiredAmount1);
+        
+        // Store pool info for the modal
+        if (result.poolInfo) {
+          setPoolInfo(result.poolInfo);
+        }
+        
+        toast.info('Amounts updated to match liquidity requirements');
+      } else {
+        console.error('Calculation failed:', result.error);
+        toast.error('Failed to calculate requirements: ' + (result.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error calculating requirements:', error);
+      toast.error('Error calculating requirements');
+    }
+  };
+
+  // Simple onChange handlers for immediate state updates
+  const handleToken0AmountChange = (amount: string) => {
+    setToken0Amount(amount);
+  };
+
   const handleToken1AmountChange = (amount: string) => {
-    setToken1Amount(amount)
-  }
+    setToken1Amount(amount);
+  };
+
+  const currPrice = BigInt(Math.floor(79228162514264337593543950336));
 
   return (
     <Container>
@@ -662,7 +772,7 @@ export function CreatePoolForm() {
                 <SectionHeader>
                   <SectionTitle>Add Liquidity</SectionTitle>
                   <SectionDescription>
-                    Set your price range and deposit tokens.
+                    Set your price range and deposit tokens. Enter both amounts, then tab out of the second token to calculate requirements.
                   </SectionDescription>
                 </SectionHeader>
                 
@@ -672,6 +782,7 @@ export function CreatePoolForm() {
                   token1Symbol={poolState.token1?.symbol}
                 />
                 
+
                 <DepositAmountInputs 
                   token0={poolState.token0 || null}
                   token1={poolState.token1 || null}
@@ -679,9 +790,11 @@ export function CreatePoolForm() {
                   token1Amount={token1Amount}
                   onToken0AmountChange={handleToken0AmountChange}
                   onToken1AmountChange={handleToken1AmountChange}
+                  onToken0AmountBlur={handleToken0AmountBlur}
+                  onToken1AmountBlur={handleToken1AmountBlur}
                   tickLower={isFullRange ? -887272 : parseInt(minPrice)}
                   tickUpper={isFullRange ? 887272 : parseInt(maxPrice)}
-                  currentPrice={poolState.sqrtPriceX96 || 79228162514264337593543950336n}
+                  currentPrice={currPrice}
                 />
               </FormSection>
             )}
@@ -690,12 +803,12 @@ export function CreatePoolForm() {
               type="submit" 
               disabled={
                 currentStep === 1 ? !canProceedToStep2 : 
-                isLoading 
+                isAddingLiquidity || !token0Amount || !token1Amount
               }
             >
-              {isLoading ? 'Processing...' : 
+              {isAddingLiquidity ? 'Processing...' : 
                currentStep === 1 ? 'Continue' : 
-               'Add Liquidity'}
+               'Review'}
             </ActionButton>
           </Form>
         ) : (
@@ -713,6 +826,25 @@ export function CreatePoolForm() {
           </ConnectPrompt>
         )}
       </MainContent>
+
+      {/* Review Modal */}
+      <ReviewModal
+        isOpen={showReviewModal}
+        onClose={() => setShowReviewModal(false)}
+        onCreatePosition={handleCreatePosition}
+        token0={poolState.token0}
+        token1={poolState.token1}
+        token0Amount={token0Amount}
+        token1Amount={token1Amount}
+        feeInfo={poolState.fee}
+        priceRange={{
+          min: minPrice,
+          max: maxPrice,
+          isFullRange
+        }}
+        poolInfo={poolInfo}
+        isLoading={isLoading}
+      />
     </Container>
   )
 }

@@ -16,5 +16,13 @@ export const UNICHAIN_SEPOLIA_TOKENS: Token[] = [
     symbol: 'ETH',
     decimals: 18,
     logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png'
+  },
+  {
+    chainId: 11155111,
+    name: 'USDCoin',
+    address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+    symbol: 'USDC',
+    decimals: 6,
+    logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png'
   }
 ] 

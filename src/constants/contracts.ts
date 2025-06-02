@@ -9,4 +9,9 @@ export const CONTRACTS = {
     PositionManager: '0xf969aee60879c54baaed9f3ed26147db216fd664',
     StateView: '0xc199f1072a74d4e905aba1a84d9a45e2546b6222',
   },
+  11155111: {
+    PoolManager: '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543',
+    PositionManager: '0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4',
+    StateView: '0xe1dd9c3fa50edb962e442f60dfbc432e24537e4c',
+  },
 };

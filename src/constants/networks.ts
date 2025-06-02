@@ -30,29 +30,29 @@ export const SUPPORTED_NETWORKS: NetworkConfig[] = [
     rpcUrl: import.meta.env.VITE_MAINNET_RPC_URL,
   },
   {
-    id: 5,
-    name: 'Goerli',
+    id: 11155111,
+    name: 'Ethereum Sepolia',
     nativeCurrency: {
-      name: 'Goerli Ether',
-      symbol: 'gETH',
+      name: 'Sepolia Ether',
+      symbol: 'ETH',
       decimals: 18,
     },
     rpcUrls: {
       default: {
-        http: [import.meta.env.VITE_GOERLI_RPC_URL]
+        http: [import.meta.env.VITE_SEPOLIA_RPC_URL]
       },
       public: {
-        http: [import.meta.env.VITE_GOERLI_RPC_URL]
+        http: [import.meta.env.VITE_SEPOLIA_RPC_URL]
       }
     },
     blockExplorers: {
       default: {
         name: 'Etherscan',
-        url: 'https://goerli.etherscan.io'
+        url: 'https://sepolia.etherscan.io'
       }
     },
     testnet: true,
-    rpcUrl: import.meta.env.VITE_GOERLI_RPC_URL,
+    rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL,
   },
   {
     id: 1301,

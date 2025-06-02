@@ -1680,7 +1680,7 @@
 
 "@uniswap/v4-core@^1.0.2":
   version "1.0.2"
-  resolved "https://registry.npmjs.org/@uniswap/v4-core/-/v4-core-1.0.2.tgz"
+  resolved "https://registry.yarnpkg.com/@uniswap/v4-core/-/v4-core-1.0.2.tgz#5b5701267eea25e84221f7697d971fb4f66169f6"
   integrity sha512-X15Tm2wWd+USAzEExMbo+g9naA6QN6mPgWm0MzDwRNlOfaNlepfUpSyt9RSrUfEODspwbyWbcLg6t5nwc/e7lg==
 
 "@uniswap/v4-sdk@^1.21.4":
@@ -4113,6 +4113,11 @@ update-browserslist-db@^1.1.1:
   dependencies:
     escalade "^3.2.0"
     picocolors "^1.1.1"
+
+use-debounce@^10.0.4:
+  version "10.0.4"
+  resolved "https://registry.yarnpkg.com/use-debounce/-/use-debounce-10.0.4.tgz#2135be498ad855416c4495cfd8e0e130bd33bb24"
+  integrity sha512-6Cf7Yr7Wk7Kdv77nnJMf6de4HuDE4dTxKij+RqE9rufDsI6zsbjyAxcH5y2ueJCQAnfgKbzXbZHYlkFwmBlWkw==
 
 use-sync-external-store@1.2.0:
   version "1.2.0"
