@@ -3,15 +3,16 @@ import { useWallet } from './useWallet'
 import { parseUnits, keccak256, encodePacked, encodeAbiParameters } from 'viem'
 import { CONTRACTS } from '../constants/contracts'
 import { Actions } from '@uniswap/v4-sdk'
+import universalRouterAbi from '../../contracts/universalRouter.json'
 
 // Import the ABI properly - it might be the default export or have a different structure
-let universalRouterAbi: any;
-try {
-  universalRouterAbi = require('../../contracts/universalRouter.json');
-} catch (error) {
-  console.error('Failed to load Universal Router ABI:', error);
-  universalRouterAbi = { abi: [] };
-}
+// let universalRouterAbi: any;
+// try {
+//   universalRouterAbi = require('../../contracts/universalRouter.json');
+// } catch (error) {
+//   console.error('Failed to load Universal Router ABI:', error);
+//   universalRouterAbi = { abi: [] };
+// }
 
 // Fallback ABI for Universal Router if the JSON file isn't working
 const UNIVERSAL_ROUTER_ABI = [
@@ -87,7 +88,7 @@ interface SwapResult {
 
 // V4 Universal Router Commands
 const Commands = {
-  V4_SWAP: 0x00
+  V4_SWAP: 0x10
 } as const
 
 // Generate pool ID from pool key (V4 style)
@@ -340,8 +341,6 @@ export function useV4Swap() {
       console.log('- inputs[0] type:', typeof inputs[0], 'value length:', inputs[0]?.length);
       console.log('- swapDeadline type:', typeof swapDeadline, 'value:', swapDeadline.toString());
       console.log('- address type:', typeof address, 'value:', address);
-      console.log('- abi exists:', !!universalRouterAbi.abi);
-      console.log('- abi length:', universalRouterAbi.abi?.length);
 
       // Try to find the execute function in the ABI
       const executeFunctions = universalRouterAbi.abi.filter((item: any) => 

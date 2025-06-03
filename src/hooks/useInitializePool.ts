@@ -401,7 +401,7 @@ export function useInitializePool() {
     console.log('Final sanitized permit batch:', sanitizedPermitBatch);
 
     const signature = await walletClient.signTypedData({
-      account: userAddress as `0x${string}`,
+      account: currentUserAddress as `0x${string}`,
       domain,
       types: PERMIT2_BATCH_TYPES,
       primaryType: 'PermitBatch',
@@ -421,8 +421,8 @@ export function useInitializePool() {
       return { success: false, error: 'Chain not supported' };
     }
 
-    let userAddress = userAddress;
-    if (!userAddress) return { success: false, error: 'Address not available' };
+    let currentUserAddress = userAddress;
+    if (!currentUserAddress) return { success: false, error: 'Address not available' };
 
     setIsInitializing(true);
 
@@ -543,7 +543,7 @@ export function useInitializePool() {
       let mintOptions: any = {
         slippageTolerance,
         deadline,
-        recipient: userAddress,
+        recipient: currentUserAddress,
         useNative: (isToken0Native || isToken1Native) ? Ether.onChain(chainId) : undefined,
         // KEY DIFFERENCE: Add these options for pool initialization
         createPool: true,
@@ -567,7 +567,7 @@ export function useInitializePool() {
         console.log('Permit signature generated successfully');
 
         mintOptions.batchPermit = {
-          owner: userAddress,
+          owner: currentUserAddress,
           permitBatch: permitBatchData,
           signature
         };
