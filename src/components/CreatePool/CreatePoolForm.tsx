@@ -13,11 +13,12 @@ import DepositAmountInputs from './DepositAmountInputs'
 import ReviewModal from './ReviewModal'
 import { Tooltip } from '../shared/Tooltip'
 import { toast } from 'react-toastify'
-import { parseUnits } from 'viem'
+import { parseUnits, encodeAbiParameters } from 'viem'
 import { CONTRACTS } from '../../constants/contracts'
 import { calculateTickSpacingFromFeeAmount } from '../Liquidity/utils'
 import { NetworkSelector } from '../shared/NetworkSelector'
-import { generatePoolId, checkPoolExistsWithStateView } from '../../utils/stateViewUtils';
+import { generatePoolId, getPoolInfo, needsPoolCreation, isPoolReady } from '../../utils/stateViewUtils';
+import { addDeployedPool } from '../Swap/DeployedPoolsList'
 
 const Container = styled.div`
   display: flex;
@@ -322,6 +323,33 @@ export function CreatePoolForm() {
         hookAddress: poolState.hookAddress
       });
 
+      const poolKey = {
+        currency0: poolState.token0?.address || '',
+        currency1: poolState.token1?.address || '',
+        fee: poolState.fee.fee,
+        tickSpacing: poolState.fee.tickSpacing,
+        hooks: poolState.hookAddress || '0x0000000000000000000000000000000000000000'
+      };
+
+      const encodedPoolKey = encodeAbiParameters(
+        [
+          { name: 'currency0', type: 'address' },
+          { name: 'currency1', type: 'address' },
+          { name: 'fee', type: 'uint24' },
+          { name: 'tickSpacing', type: 'int24' },
+          { name: 'hooks', type: 'address' }
+        ],
+        [
+          poolKey.currency0 as `0x${string}`,
+          poolKey.currency1 as `0x${string}`,
+          poolKey.fee,
+          poolKey.tickSpacing,
+          poolKey.hooks as `0x${string}`
+        ]
+      );
+
+      addDeployedPool(encodedPoolKey);
+
       const poolId = generatePoolId({
         currency0: poolState.token0?.address || '',
         currency1: poolState.token1?.address || '',
@@ -343,20 +371,32 @@ export function CreatePoolForm() {
       if (!chainId || !CONTRACTS[chainId as keyof typeof CONTRACTS]) {
         console.error('Unsupported chain ID:', chainId);
         toast.error(`Network ${chainId} is not supported for pool operations`);
-        return { exists: false, poolId: null };
+        return { exists: false, isInitialized: false, poolId: null };
       }
 
       const poolId = await getPoolId();
       if (!poolId) {
         console.error('Failed to get pool ID');
-        return { exists: false, poolId: null };
+        return { exists: false, isInitialized: false, poolId: null };
       }
 
       const rpcUrl = network?.rpcUrl || 'https://unichain-sepolia-rpc.publicnode.com';
-      return await checkPoolExistsWithStateView(chainId, rpcUrl, poolId);
+      const poolInfo = await getPoolInfo(chainId, rpcUrl, poolId);
+      
+      console.log('Pool existence check result:', {
+        exists: poolInfo.exists,
+        isInitialized: poolInfo.isInitialized,
+        poolId
+      });
+      
+      return {
+        exists: poolInfo.exists,
+        isInitialized: poolInfo.isInitialized,
+        poolId
+      };
     } catch (error) {
       console.error('Error checking if pool exists:', error);
-      return { exists: false, poolId: null };
+      return { exists: false, isInitialized: false, poolId: null };
     }
   };
 
@@ -399,7 +439,7 @@ export function CreatePoolForm() {
       toast.error('Missing token information');
       return;
     }
-
+  
     const calculatedTickSpacing = calculateTickSpacingFromFeeAmount(poolState.fee?.fee || 0);
     
     console.log(`Creating Position (${new Date().toISOString()}):`, {
@@ -437,31 +477,84 @@ export function CreatePoolForm() {
     
     setIsLoading(true);
     try {
-      const { exists, poolId: existingPoolId } = await checkPoolExists();
-      console.log('Pool existence check result:', { exists, poolId: existingPoolId });
+      const { exists, isInitialized, poolId: existingPoolId } = await checkPoolExists();
+      console.log('Pool existence check result:', { exists, isInitialized, poolId: existingPoolId });
       
-      if (exists && existingPoolId) {
+      if (exists && isInitialized && existingPoolId) {
         setPoolId(existingPoolId);
-        toast.info('Pool exists. Adding liquidity...');
+        toast.info('Pool exists and is ready. Adding liquidity...');
         
         // Add liquidity to existing pool using the useV4Position hook
         await addLiquidityToPool(existingPoolId);
         
         toast.success('Liquidity added successfully!');
         setShowReviewModal(false); // Close modal on success
+      } else if (exists && !isInitialized && existingPoolId) {
+        setPoolId(existingPoolId);
+        toast.info('Pool exists but needs initialization. Initializing and adding liquidity...');
+        
+        // Pool exists but not initialized - initialize it with parameters
+        const result = await initializePool({
+          poolId: existingPoolId,
+          token0: {
+            address: poolState.token0.address,
+            decimals: poolState.token0.decimals,
+            amount: token0Amount,
+            symbol: poolState.token0.symbol
+          },
+          token1: {
+            address: poolState.token1.address,
+            decimals: poolState.token1.decimals,
+            amount: token1Amount,
+            symbol: poolState.token1.symbol
+          },
+          fee: poolState.fee.fee,
+          tickLower: isFullRange ? -887272 : parseInt(minPrice || '0'),
+          tickUpper: isFullRange ? 887272 : parseInt(maxPrice || '0'),
+          hookAddress: poolState.hookAddress,
+          slippageToleranceBips: 50
+        });
+        
+        console.log('Pool initialization result:', result);
+        
+        if (result.success && result.poolId) {
+          console.log('Pool initialized successfully:', result.poolId);
+          toast.success('Pool initialized and liquidity added successfully!');
+          setShowReviewModal(false); // Close modal on success
+        } else {
+          console.error('Failed to initialize pool:', result);
+          toast.error('Failed to initialize pool: ' + (result.error || 'Unknown error'));
+        }
       } else {
         toast.info('Pool does not exist. Creating pool first...');
         
-        const result = await initializePool();
-        console.log('Pool initialization result:', result);
+        // Pool doesn't exist - create it with parameters
+        const result = await initializePool({
+          poolId: existingPoolId || '', // Use existing or empty
+          token0: {
+            address: poolState.token0.address,
+            decimals: poolState.token0.decimals,
+            amount: token0Amount,
+            symbol: poolState.token0.symbol
+          },
+          token1: {
+            address: poolState.token1.address,
+            decimals: poolState.token1.decimals,
+            amount: token1Amount,
+            symbol: poolState.token1.symbol
+          },
+          fee: poolState.fee.fee,
+          tickLower: isFullRange ? -887272 : parseInt(minPrice || '0'),
+          tickUpper: isFullRange ? 887272 : parseInt(maxPrice || '0'),
+          hookAddress: poolState.hookAddress,
+          slippageToleranceBips: 50
+        });
+        
+        console.log('Pool creation result:', result);
         
         if (result.success && result.poolId) {
           console.log('Pool created successfully:', result.poolId);
           setPoolId(result.poolId);
-          
-          // Now add liquidity to the newly created pool
-          await addLiquidityToPool(result.poolId);
-          
           toast.success('Pool created and liquidity added successfully!');
           setShowReviewModal(false); // Close modal on success
         } else {
@@ -654,6 +747,7 @@ export function CreatePoolForm() {
     setToken1Amount(amount);
   };
 
+  //1:1
   const currPrice = BigInt(Math.floor(79228162514264337593543950336));
 
   return (
@@ -750,8 +844,6 @@ export function CreatePoolForm() {
                     feeAmount={poolState.fee}
                     onChange={(fee) => {
                       updateFee(fee)
-                      // Prevent form submission when selecting fee
-                      // e?.preventDefault()
                     }}
                     error={undefined}
                   />

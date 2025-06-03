@@ -1,23 +1,33 @@
 import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { TokenSelector } from '../CreatePool/TokenSelector'
-import { PoolSelector } from './PoolSelector'
 import { SwapSettings } from './SwapSettings'
 import { useV4Swap } from '../../hooks/useV4Swap'
 import { useWallet } from '../../hooks/useWallet'
-import { NetworkSelector } from '../shared/NetworkSelector'
-import { ResetButton } from '../shared/ResetButton'
 import { ArrowDown } from '../shared/icons'
 import { TestPoolDeployer } from './TestPoolDeployer'
+import { DeployedPoolsList, addDeployedPool, DeployedPool } from './DeployedPoolsList'
 
 const Container = styled.div`
   display: flex;
-  flex-direction: column;
   gap: 24px;
   padding: 16px 0;
   width: 100%;
-  max-width: 480px;
+  max-width: 840px;
   margin: 0 auto;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    max-width: 480px;
+  }
+`
+
+const MainContent = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  max-width: 480px;
 `
 
 const SwapContainer = styled.div`
@@ -91,12 +101,6 @@ const AmountInput = styled.input`
   }
 `
 
-const TokenRow = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-`
-
 const USDValue = styled.div`
   font-size: 14px;
   color: ${({ theme }) => theme.colors.neutral2};
@@ -127,8 +131,66 @@ const IconBackground = styled.div`
   }
 `
 
-const PoolSelectorContainer = styled.div`
+// New PoolId Input Section
+const PoolIdSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-top: 8px;
+`
+
+const PoolIdLabel = styled.label`
+  font-size: 14px;
+  font-weight: 500;
+  color: ${({ theme }) => theme.colors.neutral1};
+`
+
+const PoolIdInputContainer = styled.div`
+  background: ${({ theme }) => theme.colors.backgroundInteractive};
+  border-radius: 12px;
+  padding: 12px 16px;
+  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
+  
+  &:focus-within {
+    border-color: ${({ theme }) => theme.colors.accentAction};
+  }
+`
+
+const PoolIdInput = styled.input`
+  background: none;
+  border: none;
+  color: ${({ theme }) => theme.colors.neutral1};
+  font-size: 14px;
+  outline: none;
+  width: 100%;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  
+  &::placeholder {
+    color: ${({ theme }) => theme.colors.neutral3};
+  }
+`
+
+const PoolInfoContainer = styled.div`
+  background: ${({ theme }) => theme.colors.backgroundInteractive};
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 8px;
+  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
+`
+
+const PoolInfoTitle = styled.div`
+  font-size: 14px;
+  font-weight: 500;
+  color: ${({ theme }) => theme.colors.neutral1};
+  margin-bottom: 4px;
+`
+
+const PoolInfoDetail = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.neutral2};
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
 `
 
 const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary'; $disabled?: boolean }>`
@@ -178,29 +240,34 @@ const LoadingText = styled.div`
   font-weight: 500;
 `
 
+const ValidatingText = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.neutral3};
+  margin-top: 4px;
+  font-style: italic;
+`
+
 export function SwapForm() {
-  const { isConnected, address, connectWallet } = useWallet()
+  const { isConnected, address, connectWallet, network } = useWallet()
   const {
     swapState,
     validation,
     isSwapping,
-    isLoadingPools,
-    availablePools,
+    isValidatingPool,
+    poolInfo,
     updateTokenIn,
     updateTokenOut,
     updateAmountIn,
-    updateSelectedPool,
+    updatePoolId,
     updateSlippageTolerance,
     updateDeadline,
     swapTokens,
     executeSwap,
-    validateSwap,
-    setAvailablePools
+    validateSwap
   } = useV4Swap()
   
   const [error, setError] = useState<string | null>(null)
   const [sellMode, setSellMode] = useState<boolean>(true)
-  const [showTestPoolDeployer, setShowTestPoolDeployer] = useState<boolean>(true)
   
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
@@ -222,13 +289,23 @@ export function SwapForm() {
       if (!result.success) {
         setError(result.error || 'Swap failed');
       } else if (result.txHash) {
-        // Show success message
         setError(null);
-        // If in test mode, we can show a success message
         alert(`Swap successful! Transaction: ${result.txHash.slice(0, 10)}...`);
-        
-        // Reset the input amount but keep the tokens and pool
         updateAmountIn('');
+        
+        // If we have pool info and a successful swap, add to deployed pools
+        if (poolInfo && swapState.poolId) {
+          const newPool: DeployedPool = {
+            poolId: swapState.poolId,
+            token0Symbol: poolInfo.token0Symbol,
+            token1Symbol: poolInfo.token1Symbol,
+            fee: poolInfo.fee,
+            networkId: network?.id || 1,
+            networkName: network?.name || 'Ethereum',
+            timestamp: Date.now()
+          };
+          addDeployedPool(newPool);
+        }
       }
     } catch (error: any) {
       setError(error.message || 'Swap failed');
@@ -237,163 +314,190 @@ export function SwapForm() {
   
   const getButtonText = () => {
     if (!isConnected) return 'Connect Wallet';
-    if (!swapState.tokenIn) return 'Select a token';
-    if (!swapState.tokenOut) return 'Select a token';
+    if (!swapState.poolId) return 'Enter Pool ID';
+    if (isValidatingPool) return 'Validating Pool...';
+    if (!poolInfo) return 'Invalid Pool ID';
+    if (!swapState.tokenIn) return 'Select input token';
+    if (!swapState.tokenOut) return 'Select output token';
     if (!swapState.amountIn) return 'Enter an amount';
-    if (!swapState.selectedPool) return 'Select a pool';
     return 'Swap';
   }
   
   const isButtonDisabled = () => {
-    if (!isConnected) return false; // Allow connecting wallet
+    if (!isConnected) return false;
     return (
+      !swapState.poolId ||
+      isValidatingPool ||
+      !poolInfo ||
       !swapState.tokenIn ||
       !swapState.tokenOut ||
       !swapState.amountIn ||
-      !swapState.selectedPool ||
       isSwapping
     );
-  }
-  
-  const handleReset = () => {
-    // Reset the form
-    updateTokenIn({
-      address: '',
-      symbol: '',
-      name: '',
-      decimals: 18
-    });
-    updateTokenOut({
-      address: '',
-      symbol: '',
-      name: '',
-      decimals: 18
-    });
-    updateAmountIn('');
-    setError(null);
   }
 
   const handlePoolDeployed = (pool: {
     address: string;
+    poolId: string;
     token0: any;
     token1: any;
     fee: number;
     hookAddress: string;
   }) => {
-    // Update available pools
-    setAvailablePools([pool]);
-    
-    // Auto-select the newly deployed pool
-    updateSelectedPool(pool);
+    // Auto-fill the pool ID
+    updatePoolId(pool.poolId);
     
     // Auto-select tokens
     updateTokenIn(pool.token0);
     updateTokenOut(pool.token1);
     
-    // Hide the test pool deployer
-    setShowTestPoolDeployer(false);
+    // Add to deployed pools
+    const newPool: DeployedPool = {
+      poolId: pool.poolId,
+      token0Symbol: pool.token0.symbol,
+      token1Symbol: pool.token1.symbol,
+      fee: pool.fee,
+      networkId: network?.id || 1,
+      networkName: network?.name || 'Ethereum',
+      timestamp: Date.now()
+    };
+    addDeployedPool(newPool);
   }
+  
+  // Handle pool selection from the deployed pools list
+  const handleSelectPool = (poolId: string) => {
+    updatePoolId(poolId);
+  };
   
   // Clear error when inputs change
   useEffect(() => {
     setError(null);
-  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, swapState.selectedPool]);
+  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, swapState.poolId]);
   
   return (
     <Container>
-      <TestPoolDeployer onPoolDeployed={handlePoolDeployed} />
+      <MainContent>
+        <TestPoolDeployer onPoolDeployed={handlePoolDeployed} />
+        
+        <SwapContainer>
+          <SwapHeader>
+            <SwapTabs>
+              <SwapTab $active={sellMode} onClick={() => setSellMode(true)}>
+                Sell
+              </SwapTab>
+              <SwapTab $active={!sellMode} onClick={() => setSellMode(false)}>
+                Buy
+              </SwapTab>
+            </SwapTabs>
+            <SwapSettings
+              slippageTolerance={swapState.slippageTolerance}
+              deadline={swapState.deadline}
+              onSlippageChange={updateSlippageTolerance}
+              onDeadlineChange={updateDeadline}
+            />
+          </SwapHeader>
+
+          {/* Pool ID Input Section */}
+          <PoolIdSection>
+            <PoolIdLabel>Pool Key</PoolIdLabel>
+            <PoolIdInputContainer>
+              <PoolIdInput
+                placeholder="0x1234567890abcdef... (Enter the pool Key to swap through)"
+                value={swapState.poolId}
+                onChange={(e) => updatePoolId(e.target.value)}
+              />
+            </PoolIdInputContainer>
+            {isValidatingPool && (
+              <ValidatingText>Validating pool...</ValidatingText>
+            )}
+            {poolInfo && (
+              <PoolInfoContainer>
+                <PoolInfoTitle>
+                  {poolInfo.token0Symbol}/{poolInfo.token1Symbol} Pool
+                </PoolInfoTitle>
+                <PoolInfoDetail>
+                  <span>Fee:</span>
+                  <span>{(poolInfo.fee / 10000).toFixed(2)}%</span>
+                </PoolInfoDetail>
+                <PoolInfoDetail>
+                  <span>Liquidity:</span>
+                  <span>{poolInfo.liquidity}</span>
+                </PoolInfoDetail>
+                <PoolInfoDetail>
+                  <span>Current Tick:</span>
+                  <span>{poolInfo.tick}</span>
+                </PoolInfoDetail>
+              </PoolInfoContainer>
+            )}
+            {validation.poolIdError && (
+              <ErrorMessage>{validation.poolIdError}</ErrorMessage>
+            )}
+          </PoolIdSection>
+          
+          {/* Input (From) section */}
+          <InputContainer>
+            <InputHeader>
+              {sellMode ? 'You sell' : 'You pay'}
+            </InputHeader>
+            <InputRow>
+              <AmountInput
+                placeholder="0"
+                value={swapState.amountIn}
+                onChange={(e) => updateAmountIn(e.target.value)}
+              />
+              <TokenSelector
+                label="Select token"
+                token={swapState.tokenIn}
+                onChange={updateTokenIn}
+                error={validation.tokenInError}
+              />
+            </InputRow>
+            {swapState.tokenIn && <USDValue>$0.00</USDValue>}
+          </InputContainer>
+          
+          {/* Swap direction button */}
+          <SwapButtonContainer>
+            <IconBackground onClick={swapTokens}>
+              <ArrowDown width={16} height={16} />
+            </IconBackground>
+          </SwapButtonContainer>
+          
+          {/* Output (To) section */}
+          <InputContainer>
+            <InputHeader>
+              {sellMode ? 'You buy' : 'You receive'}
+            </InputHeader>
+            <InputRow>
+              <AmountInput
+                placeholder="0"
+                value={swapState.amountOut}
+                readOnly
+              />
+              <TokenSelector
+                label="Select token"
+                token={swapState.tokenOut}
+                onChange={updateTokenOut}
+                error={validation.tokenOutError}
+              />
+            </InputRow>
+            {swapState.tokenOut && <USDValue>$0.00</USDValue>}
+          </InputContainer>
+          
+          {/* Swap button */}
+          <ActionButton
+            onClick={handleSwapButtonClick}
+            $disabled={isButtonDisabled()}
+            disabled={isButtonDisabled()}
+          >
+            {getButtonText()}
+          </ActionButton>
+          
+          {error && <ErrorMessage>{error}</ErrorMessage>}
+        </SwapContainer>
+      </MainContent>
       
-      <SwapContainer>
-        <SwapHeader>
-          <SwapTabs>
-            <SwapTab $active={sellMode} onClick={() => setSellMode(true)}>
-              Sell
-            </SwapTab>
-            <SwapTab $active={!sellMode} onClick={() => setSellMode(false)}>
-              Buy
-            </SwapTab>
-          </SwapTabs>
-          <SwapSettings
-            slippageTolerance={swapState.slippageTolerance}
-            deadline={swapState.deadline}
-            onSlippageChange={updateSlippageTolerance}
-            onDeadlineChange={updateDeadline}
-          />
-        </SwapHeader>
-        
-        {/* Input (From) section */}
-        <InputContainer>
-          <InputHeader>
-            {sellMode ? 'You sell' : 'You pay'}
-          </InputHeader>
-          <InputRow>
-            <AmountInput
-              placeholder="0"
-              value={swapState.amountIn}
-              onChange={(e) => updateAmountIn(e.target.value)}
-            />
-            <TokenSelector
-              label="Select token"
-              token={swapState.tokenIn}
-              onChange={updateTokenIn}
-              error={validation.tokenInError}
-            />
-          </InputRow>
-          {swapState.tokenIn && <USDValue>$0.00</USDValue>}
-        </InputContainer>
-        
-        {/* Swap direction button */}
-        <SwapButtonContainer>
-          <IconBackground onClick={swapTokens}>
-            <ArrowDown width={16} height={16} />
-          </IconBackground>
-        </SwapButtonContainer>
-        
-        {/* Output (To) section */}
-        <InputContainer>
-          <InputHeader>
-            {sellMode ? 'You buy' : 'You receive'}
-          </InputHeader>
-          <InputRow>
-            <AmountInput
-              placeholder="0"
-              value={swapState.amountOut}
-              readOnly
-            />
-            <TokenSelector
-              label="Select token"
-              token={swapState.tokenOut}
-              onChange={updateTokenOut}
-              error={validation.tokenOutError}
-            />
-          </InputRow>
-          {swapState.tokenOut && <USDValue>$0.00</USDValue>}
-        </InputContainer>
-        
-        {/* Pool selector - only show when both tokens are selected */}
-        {swapState.tokenIn && swapState.tokenOut && (
-          <PoolSelectorContainer>
-            <PoolSelector
-              selectedPool={swapState.selectedPool}
-              availablePools={availablePools}
-              onSelectPool={updateSelectedPool}
-              isLoading={isLoadingPools}
-              error={validation.poolError}
-            />
-          </PoolSelectorContainer>
-        )}
-        
-        {/* Swap button */}
-        <ActionButton
-          onClick={handleSwapButtonClick}
-          $disabled={isButtonDisabled()}
-          disabled={isButtonDisabled()}
-        >
-          {getButtonText()}
-        </ActionButton>
-        
-        {error && <ErrorMessage>{error}</ErrorMessage>}
-      </SwapContainer>
+      {/* Deployed Pools List */}
+      <DeployedPoolsList onSelectPool={handleSelectPool} />
       
       {isSwapping && (
         <LoadingOverlay>
@@ -402,4 +506,4 @@ export function SwapForm() {
       )}
     </Container>
   )
-} 
+}

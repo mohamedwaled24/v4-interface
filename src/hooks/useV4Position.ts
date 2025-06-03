@@ -1,20 +1,20 @@
 import { useState } from 'react'
-import { parseUnits, formatUnits, maxUint256, encodeFunctionData } from 'viem'
+import { parseUnits, formatUnits, maxUint256, encodeFunctionData, getAddress } from 'viem'
 import { mainnet, sepolia } from 'viem/chains'
 import { useWallet } from './useWallet'
 import { CONTRACTS } from '../constants/contracts'
 import { generatePoolId } from '../utils/stateViewUtils'
+import permit2Abi from '../../contracts/permit2.json'
 
 import { Token, Percent, Ether } from '@uniswap/sdk-core'
 import { Pool, Position } from '@uniswap/v4-sdk'
 import { V4PositionManager } from '@uniswap/v4-sdk'
 import { nearestUsableTick } from '@uniswap/v3-sdk'
 import { getPoolInfo } from '../utils/stateViewUtils'
-import { positionManagerAbi } from '../../contracts/positionManager'
 import { calculateTickSpacingFromFeeAmount } from '../components/Liquidity/utils'
 
-// Permit2 contract address (same across all networks)
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+
 const ERC20_ABI = [
   {
     name: 'approve',
@@ -38,13 +38,25 @@ const ERC20_ABI = [
   }
 ] as const;
 
-interface PoolKey {
-  currency0: string;
-  currency1: string;
-  fee: number;
-  tickSpacing: number;
-  hooks: string;
-}
+const PERMIT2_DOMAIN = {
+  name: 'Permit2',
+  chainId: 0,
+  verifyingContract: PERMIT2_ADDRESS as `0x${string}`
+};
+
+const PERMIT2_BATCH_TYPES = {
+  PermitBatch: [
+    { name: 'details', type: 'PermitDetails[]' },
+    { name: 'spender', type: 'address' },
+    { name: 'sigDeadline', type: 'uint256' }
+  ],
+  PermitDetails: [
+    { name: 'token', type: 'address' },
+    { name: 'amount', type: 'uint160' },
+    { name: 'expiration', type: 'uint48' },
+    { name: 'nonce', type: 'uint48' }
+  ]
+};
 
 interface AddLiquidityParams {
   token0: {
@@ -64,7 +76,7 @@ interface AddLiquidityParams {
   tickUpper: number;
   recipient?: string;
   hookAddress?: string;
-  slippageToleranceBips?: number; // e.g., 50 = 0.5%
+  slippageToleranceBips?: number;
 }
 
 interface CalculateAmountsResult {
@@ -77,13 +89,13 @@ interface CalculateAmountsResult {
     liquidity: string;
     tick: number;
   };
-  // Internal data for actual execution
   _positionData?: {
     position: Position;
-    mintOptions: any;
     token0: any;
     token1: any;
     positionManagerAddress: string;
+    deadline: number;
+    slippageTolerance: Percent;
   };
 }
 
@@ -93,11 +105,34 @@ interface ExecuteTransactionResult {
   error?: string;
 }
 
-export function useV4Position() {
-  const { publicClient, walletClient, chainId, address, isConnected } = useWallet()
-  const [isAddingLiquidity, setIsAddingLiquidity] = useState(false)
+// Helper function to ensure proper number formatting for MetaMask
+const formatNumberForMetaMask = (value: any): string => {
+  // Handle arrays - this might be the issue
+  if (Array.isArray(value)) {
+    console.warn('Array passed to formatNumberForMetaMask:', value);
+    return value[0]?.toString() || '0';
+  }
+  
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (typeof value === 'number') {
+    return value.toString();
+  }
+  if (typeof value === 'string') {
+    // Remove any locale-specific formatting and ensure proper decimal format
+    return value.replace(/,/g, '');
+  }
+  
+  console.warn('Unexpected value type in formatNumberForMetaMask:', typeof value, value);
+  return String(value);
+};
 
-  // Helper function to get chain object from chainId
+export function useV4Position() {
+  const { publicClient, walletClient, chainId, address, isConnected, network } = useWallet()
+  const [isAddingLiquidity, setIsAddingLiquidity] = useState(false)
+  const [currentPoolId, setCurrentPoolId] = useState<string | null>(null)
+
   const getChainFromId = (chainId: number) => {
     switch (chainId) {
       case 1:
@@ -105,7 +140,6 @@ export function useV4Position() {
       case 11155111:
         return sepolia;
       case 1301:
-        // Unichain Sepolia - you may need to define this chain object
         return {
           id: 1301,
           name: 'Unichain Sepolia',
@@ -120,21 +154,17 @@ export function useV4Position() {
     }
   };
 
-  // Helper function to approve token spending via Permit2
-  const approveTokenForPermit2 = async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
-    if (!walletClient || !publicClient) {
-      return { success: false, error: 'Wallet not connected' };
+  const isNativeToken = (tokenAddress: string): boolean => {
+    return tokenAddress === '0x0000000000000000000000000000000000000000' ||
+           tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+  };
+
+  const approveTokenToPermit2 = async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
+    if (!walletClient || !publicClient || isNativeToken(tokenAddress)) {
+      return { success: true };
     }
 
     try {
-      // Skip approval for native ETH
-      if (isNativeToken(tokenAddress)) {
-        return { success: true };
-      }
-
-      console.log(`Checking Permit2 approval for token ${tokenAddress}`);
-
-      // Check current allowance to Permit2 contract
       const currentAllowance = await publicClient.readContract({
         address: tokenAddress as `0x${string}`,
         abi: ERC20_ABI,
@@ -142,17 +172,10 @@ export function useV4Position() {
         args: [address as `0x${string}`, PERMIT2_ADDRESS as `0x${string}`]
       });
 
-      console.log(`Current Permit2 allowance: ${currentAllowance.toString()}`);
-
-      // If allowance is sufficient, no need to approve
       if (currentAllowance >= amount) {
-        console.log(`Token ${tokenAddress} already has sufficient Permit2 allowance`);
         return { success: true };
       }
 
-      console.log(`Approving token ${tokenAddress} for Permit2 contract: ${PERMIT2_ADDRESS}`);
-
-      // Approve token to Permit2 contract (not Position Manager)
       const data = encodeFunctionData({
         abi: ERC20_ABI,
         functionName: 'approve',
@@ -167,118 +190,151 @@ export function useV4Position() {
       });
 
       await publicClient.waitForTransactionReceipt({ hash });
-      
-      console.log(`Permit2 approval successful: ${hash}`);
       return { success: true };
     } catch (error: any) {
-      console.error('Permit2 approval failed:', error);
-      return { success: false, error: error.message || 'Permit2 approval failed' };
+      return { success: false, error: error.message };
     }
   };
-  const isNativeToken = (tokenAddress: string): boolean => {
-    return tokenAddress === '0x0000000000000000000000000000000000000000' ||
-           tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
-  };
 
-  // Helper function to approve token spending
-  const approveToken = async (tokenAddress: string, spender: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
-    if (!walletClient || !publicClient) {
-      return { success: false, error: 'Wallet not connected' };
+  const checkPermit2Allowance = async (tokenAddress: string, spender: string): Promise<{ amount: bigint; expiration: number; nonce: number }> => {
+    if (!publicClient || !address || isNativeToken(tokenAddress)) {
+      return { amount: BigInt(0), expiration: 0, nonce: 0 };
     }
 
     try {
-      // Skip approval for native ETH
-      if (isNativeToken(tokenAddress)) {
-        return { success: true };
-      }
-
-      console.log(`Checking and approving token ${tokenAddress} for ${spender}`);
-
-      // Always do a fresh approval to avoid Permit2 expiration issues
-      // First, check if we need to reset existing approval
-      const currentAllowance = await publicClient.readContract({
-        address: tokenAddress as `0x${string}`,
-        abi: ERC20_ABI,
+      const result = await publicClient.readContract({
+        address: PERMIT2_ADDRESS as `0x${string}`,
+        abi: permit2Abi.abi,
         functionName: 'allowance',
-        args: [address as `0x${string}`, spender as `0x${string}`]
+        args: [address as `0x${string}`, tokenAddress as `0x${string}`, spender as `0x${string}`]
       });
 
-      console.log(`Current allowance: ${currentAllowance.toString()}`);
-
-      // If there's an existing approval, reset it first to avoid Permit2 issues
-      if (currentAllowance > 0n) {
-        console.log(`Resetting existing approval for ${tokenAddress}`);
-        
-        const resetData = encodeFunctionData({
-          abi: ERC20_ABI,
-          functionName: 'approve',
-          args: [spender as `0x${string}`, 0n] // Reset to 0
-        });
-
-        const resetHash = await walletClient.sendTransaction({
-          to: tokenAddress as `0x${string}`,
-          data: resetData,
-          account: address as `0x${string}`,
-          chain: getChainFromId(chainId!),
-        });
-
-        await publicClient.waitForTransactionReceipt({ hash: resetHash });
-        console.log(`Reset approval successful: ${resetHash}`);
-      }
-
-      // Now set the new approval
-      console.log(`Setting new approval for ${tokenAddress}`);
-      
-      const approveData = encodeFunctionData({
-        abi: ERC20_ABI,
-        functionName: 'approve',
-        args: [spender as `0x${string}`, maxUint256] // Max approval
-      });
-
-      const approveHash = await walletClient.sendTransaction({
-        to: tokenAddress as `0x${string}`,
-        data: approveData,
-        account: address as `0x${string}`,
-        chain: getChainFromId(chainId!),
-      });
-
-      await publicClient.waitForTransactionReceipt({ hash: approveHash });
-      
-      console.log(`Token approval successful: ${approveHash}`);
-      return { success: true };
-    } catch (error: any) {
-      console.error('Token approval failed:', error);
-      return { success: false, error: error.message || 'Token approval failed' };
+      return {
+        amount: result[0] as bigint,
+        expiration: Number(result[1]),
+        nonce: Number(result[2])
+      };
+    } catch (error) {
+      return { amount: BigInt(0), expiration: 0, nonce: 0 };
     }
   };
 
-  // Function to calculate required amounts (for token input updates)
-  const calculateRequiredAmounts = async (params: AddLiquidityParams): Promise<CalculateAmountsResult> => {
-    if (!chainId) return { success: false, error: 'Chain ID not available.' }
+  const signPermit2Batch = async (permitBatch: any): Promise<string> => {
+    if (!walletClient) {
+      throw new Error('Wallet not available');
+    }
 
-    if (!CONTRACTS[chainId as keyof typeof CONTRACTS])
-      return { success: false, error: `Unsupported chain ID: ${chainId}` }
+    const domain = {
+      ...PERMIT2_DOMAIN,
+      chainId: chainId!
+    };
+
+    // Helper function to extract value from JSBI or other complex objects
+    const extractNumericValue = (value: any): string => {
+      // Handle JSBI objects specifically
+      if (value && typeof value === 'object') {
+        // Check if it's a JSBI instance by looking for JSBI-specific methods/properties
+        if (value.constructor && (value.constructor.name === 'JSBI' || value.constructor.name === '_JSBI')) {
+          // Use JSBI's toString method
+          return value.toString();
+        }
+        
+        // Check if it has a toString method that returns a valid number string
+        if (typeof value.toString === 'function') {
+          const stringValue = value.toString();
+          // Verify it's a valid number string (not "[object Object]")
+          if (/^\d+$/.test(stringValue)) {
+            return stringValue;
+          }
+        }
+        
+        // If it's an object with a 'words' array (BigNumber-like structure)
+        if (value.words && Array.isArray(value.words)) {
+          // Try to convert BigNumber-like object to string
+          try {
+            return value.toString();
+          } catch (e) {
+            console.warn('Failed to convert BigNumber-like object:', value);
+          }
+        }
+        
+        // Handle regular arrays (fallback)
+        if (Array.isArray(value)) {
+          return value[0]?.toString() || '0';
+        }
+      }
+      
+      // Handle regular numbers, bigints, strings
+      if (typeof value === 'bigint') {
+        return value.toString();
+      }
+      
+      if (typeof value === 'number') {
+        return value.toString();
+      }
+      
+      if (typeof value === 'string') {
+        return value.replace(/,/g, '');
+      }
+      
+      // Last resort
+      console.warn('Unexpected value type in extractNumericValue:', typeof value, value);
+      return '0';
+    };
+
+    // Deep clone and sanitize the permit batch data
+    const sanitizedPermitBatch = {
+      spender: permitBatch.spender,
+      sigDeadline: extractNumericValue(permitBatch.sigDeadline),
+      details: permitBatch.details.map((detail: any) => {
+        console.log('Original detail:', detail);
+        console.log('Amount type and constructor:', typeof detail.amount, detail.amount?.constructor?.name);
+        console.log('Amount methods:', detail.amount && typeof detail.amount === 'object' ? Object.getOwnPropertyNames(detail.amount) : 'N/A');
+        
+        const sanitizedDetail = {
+          token: detail.token,
+          amount: extractNumericValue(detail.amount),
+          expiration: extractNumericValue(detail.expiration),
+          nonce: extractNumericValue(detail.nonce)
+        };
+        
+        console.log('Sanitized detail:', sanitizedDetail);
+        return sanitizedDetail;
+      })
+    };
+
+    console.log('Final sanitized permit batch:', sanitizedPermitBatch);
+
+    const signature = await walletClient.signTypedData({
+      account: address as `0x${string}`,
+      domain,
+      types: PERMIT2_BATCH_TYPES,
+      primaryType: 'PermitBatch',
+      message: sanitizedPermitBatch
+    });
+
+    return signature;
+  };
+
+  const calculateRequiredAmounts = async (params: AddLiquidityParams): Promise<CalculateAmountsResult> => {
+    if (!chainId || !CONTRACTS[chainId as keyof typeof CONTRACTS]) {
+      return { success: false, error: 'Chain not supported' };
+    }
 
     try {
-      // Sort tokens by address
       let token0 = params.token0
       let token1 = params.token1
       let tickLower = params.tickLower
       let tickUpper = params.tickUpper
 
-      console.log("Token0: ", token0.address)
-      console.log("Token1: ", token1.address)
-
       if (token0?.address && token1?.address && token0.address.toLowerCase() > token1.address.toLowerCase()) {
         [token0, token1] = [token1, token0]
         [tickLower, tickUpper] = [tickUpper * -1, tickLower * -1]
-      }      
+      }
 
-      // Calculate tick spacing based on fee
       const tickSpacing = calculateTickSpacingFromFeeAmount(params.fee);
       const hookAddress = params.hookAddress || '0x0000000000000000000000000000000000000000';
 
-      // Generate pool ID
       const poolKey = {
         currency0: token0.address,
         currency1: token1.address,
@@ -287,16 +343,19 @@ export function useV4Position() {
         hooks: hookAddress
       };
       const poolId = generatePoolId(poolKey);
+      // Store the poolId for later use when the transaction succeeds
+      setCurrentPoolId(poolId);
 
-      // Parse amounts - use sorted token amounts
-      const amount0 = parseUnits(token0.address === params.token0.address ? params.token0.amount : params.token1.amount, token0.decimals)
-      const amount1 = parseUnits(token1.address === params.token1.address ? params.token1.amount : params.token0.amount, token1.decimals)
+      // Use proper decimal formatting to avoid locale issues
+      const amount0Str = token0.address === params.token0.address ? params.token0.amount : params.token1.amount;
+      const amount1Str = token1.address === params.token1.address ? params.token1.amount : params.token0.amount;
+      
+      const amount0 = parseUnits(amount0Str.replace(/,/g, ''), token0.decimals);
+      const amount1 = parseUnits(amount1Str.replace(/,/g, ''), token1.decimals);
 
-      // Check for native currency
       const isToken0Native = isNativeToken(token0.address);
       const isToken1Native = isNativeToken(token1.address);
       
-      // Create currency instances
       let currency0, currency1;
       
       if (isToken0Native) {
@@ -311,15 +370,17 @@ export function useV4Position() {
         currency1 = new Token(chainId, token1.address, token1.decimals, token1.symbol);
       }
 
+      console.log('Pool Info for stateview:', {
+        poolId,
+        chainId,
+        rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL,
+      });
+
       const poolInfo = await getPoolInfo(chainId, import.meta.env.VITE_SEPOLIA_RPC_URL, poolId);
       if (!poolInfo) {
-        console.error('Pool does not exist or could not fetch real state');
         return { success: false, error: 'Failed to fetch pool data' };
-      } else {
-        console.log("Pool Info: ", poolInfo);
       }
 
-      // Construct Pool instance
       const pool = new Pool(
         currency0,
         currency1,
@@ -331,16 +392,6 @@ export function useV4Position() {
         poolInfo.tick
       );
 
-      console.log('Pool params:', {
-        token0: currency0,
-        token1: currency1,
-        fee: params.fee,
-        tickSpacing,
-        tickLower,
-        tickUpper
-      });
-
-      // Create Position instance using fromAmounts
       const adjustedTickLower = nearestUsableTick(tickLower, tickSpacing)
       const adjustedTickUpper = nearestUsableTick(tickUpper, tickSpacing)
 
@@ -353,8 +404,7 @@ export function useV4Position() {
         useFullPrecision: true
       });
 
-      // Compute and print mint amounts with slippage
-      const slippageBips = params.slippageToleranceBips ?? 50; // default 0.5%
+      const slippageBips = params.slippageToleranceBips ?? 50;
       const slippageTolerance = new Percent(slippageBips, 10_000);
 
       const { amount0: requiredAmount0, amount1: requiredAmount1 } =
@@ -363,39 +413,12 @@ export function useV4Position() {
       const requiredAmount0Formatted = formatUnits(BigInt(requiredAmount0.toString()), token0.decimals);
       const requiredAmount1Formatted = formatUnits(BigInt(requiredAmount1.toString()), token1.decimals);
 
-      console.log('--- Required amounts for user with slippage ---');
-      console.log(
-        `amount0 (${token0.symbol ?? 'token0'}):`,
-        requiredAmount0Formatted
-      )
-      console.log(
-        `amount1 (${token1.symbol ?? 'token1'}):`,
-        requiredAmount1Formatted
-      )
-
-      // Get Position Manager address for later use
       const positionManagerAddress = CONTRACTS[chainId as keyof typeof CONTRACTS].PositionManager;
       if (!positionManagerAddress) {
-        return { success: false, error: 'Position Manager not available for this chain' };
+        return { success: false, error: 'Position Manager not available' };
       }
 
-      // Prepare mint options for later use
-      let userAddress = address;
-      if (!userAddress && walletClient) {
-        try {
-          const addresses = await walletClient.getAddresses();
-          if (addresses && addresses.length > 0) userAddress = addresses[0];
-        } catch (error) {}
-      }
-      if (!userAddress) userAddress = address || '0x';
-
-      const deadline = Math.floor(Date.now() / 1000) + 1800; // 30 minutes from now
-      const mintOptions = {
-        slippageTolerance,
-        deadline,
-        recipient: userAddress,
-        useNative: (isToken0Native || isToken1Native) ? Ether.onChain(chainId) : undefined,
-      };
+      const deadline = Math.floor(Date.now() / 1000) + 1800;
 
       return {
         success: true,
@@ -406,168 +429,184 @@ export function useV4Position() {
           liquidity: poolInfo.liquidity,
           tick: poolInfo.tick
         },
-        // Store position data for later execution
         _positionData: {
           position,
-          mintOptions,
           token0,
           token1,
-          positionManagerAddress
+          positionManagerAddress,
+          deadline,
+          slippageTolerance
         }
       };
 
     } catch (error: any) {
-      console.error('Error calculating required amounts:', error);
-      return { success: false, error: error.message || 'Failed to calculate required amounts' };
+      return { success: false, error: error.message };
     }
   };
 
-  // Function to execute the actual transaction (for "Create" button)
   const executeTransaction = async (calculationResult: CalculateAmountsResult): Promise<ExecuteTransactionResult> => {
-    if (!isConnected) return { success: false, error: 'Wallet not connected.' }
-    if (!walletClient) return { success: false, error: 'Wallet client not initialized.' }
-    if (!publicClient) return { success: false, error: 'Public client not initialized.' }
-    if (!chainId) return { success: false, error: 'Chain ID not available.' }
-    if (!calculationResult._positionData) return { success: false, error: 'Position data not available. Please recalculate amounts first.' }
+    if (!isConnected || !walletClient || !publicClient || !chainId || !calculationResult._positionData) {
+      return { success: false, error: 'Prerequisites not met' };
+    }
 
     let userAddress = address;
-    if (!userAddress && walletClient) {
-      try {
-        const addresses = await walletClient.getAddresses();
-        if (addresses && addresses.length > 0) userAddress = addresses[0];
-      } catch (error) {}
-    }
-    if (!userAddress) return { success: false, error: 'Address not available.' }
+    if (!userAddress) return { success: false, error: 'Address not available' };
 
     setIsAddingLiquidity(true);
 
     try {
-      const { position, mintOptions, token0, token1, positionManagerAddress } = calculationResult._positionData;
+      const { position, token0, token1, positionManagerAddress, deadline, slippageTolerance } = calculationResult._positionData;
       const { requiredAmount0, requiredAmount1 } = calculationResult;
 
       if (!requiredAmount0 || !requiredAmount1) {
         return { success: false, error: 'Required amounts not calculated' };
       }
 
-      console.log('--- Starting actual minting process ---');
-
-      // Step 1: Approve tokens to Permit2 (not Position Manager)
-      console.log('Step 1: Approving tokens to Permit2...');
-      
-      const approval0 = await approveTokenForPermit2(token0.address, parseUnits(requiredAmount0, token0.decimals));
-      if (!approval0.success) {
-        return { success: false, error: `Failed to approve ${token0.symbol} to Permit2: ${approval0.error}` };
-      }
-
-      const approval1 = await approveTokenForPermit2(token1.address, parseUnits(requiredAmount1, token1.decimals));
-      if (!approval1.success) {
-        return { success: false, error: `Failed to approve ${token1.symbol} to Permit2: ${approval1.error}` };
-      }
-
-      console.log('Permit2 approvals completed successfully');
-
-      // Step 2: Generate calldata using V4PositionManager
-      console.log('Step 2: Generating calldata...');
-      const { calldata, value } = V4PositionManager.addCallParameters(position, mintOptions);
-
-      console.log('Generated calldata:', calldata);
-      console.log('Transaction value from SDK:', value);
-
-      // HOTFIX: Calculate the correct ETH value manually
-      // The SDK is generating wrong values for native ETH
-      let correctValue = BigInt(0);
-      
-      // Check if we're depositing native ETH and calculate the correct amount
       const isToken0Native = isNativeToken(token0.address);
       const isToken1Native = isNativeToken(token1.address);
-      
-      if (isToken0Native) {
-        correctValue = parseUnits(requiredAmount0, 18); // ETH has 18 decimals
-        console.log(`Using native ETH amount for token0: ${requiredAmount0} ETH = ${correctValue} wei`);
-      } else if (isToken1Native) {
-        correctValue = parseUnits(requiredAmount1, 18); // ETH has 18 decimals
-        console.log(`Using native ETH amount for token1: ${requiredAmount1} ETH = ${correctValue} wei`);
-      }
-      
-      console.log('Corrected transaction value:', correctValue.toString());
-      console.log('SDK value was:', BigInt(value).toString());
-      console.log('Difference factor:', BigInt(value) / correctValue);
 
-      // Step 3: Simulate the transaction
-      console.log('Step 3: Simulating transaction...');
-      
-      // Let's try a different approach - skip simulation for now and just execute
-      console.log('Skipping simulation and attempting direct execution...');
-      
-      // Step 4: Execute the transaction directly
-      console.log('Step 4: Executing transaction...');
-      
+      // Clean amounts to avoid locale formatting issues
+      const cleanAmount0 = requiredAmount0.replace(/,/g, '');
+      const cleanAmount1 = requiredAmount1.replace(/,/g, '');
+
+      // Step 1: Approve tokens to Permit2
+      const approval0 = await approveTokenToPermit2(token0.address, parseUnits(cleanAmount0, token0.decimals));
+      if (!approval0.success) {
+        return { success: false, error: approval0.error };
+      }
+
+      const approval1 = await approveTokenToPermit2(token1.address, parseUnits(cleanAmount1, token1.decimals));
+      if (!approval1.success) {
+        return { success: false, error: approval1.error };
+      }
+
+      // Step 2: Check Permit2 allowances
+      const permit2Allowance0 = await checkPermit2Allowance(token0.address, positionManagerAddress);
+      const permit2Allowance1 = await checkPermit2Allowance(token1.address, positionManagerAddress);
+
+      const now = Math.floor(Date.now() / 1000);
+      const requiredAmount0Wei = parseUnits(cleanAmount0, token0.decimals);
+      const requiredAmount1Wei = parseUnits(cleanAmount1, token1.decimals);
+
+      const needsPermit0 = !isToken0Native && (permit2Allowance0.amount < requiredAmount0Wei || permit2Allowance0.expiration < now);
+      const needsPermit1 = !isToken1Native && (permit2Allowance1.amount < requiredAmount1Wei || permit2Allowance1.expiration < now);
+
+      let mintOptions: any = {
+        slippageTolerance,
+        deadline,
+        recipient: userAddress,
+        useNative: (isToken0Native || isToken1Native) ? Ether.onChain(chainId) : undefined,
+      };
+
+      // Step 3: Add permit signature if needed
+      if (needsPermit0 || needsPermit1) {
+        console.log('Permits needed - generating batch data...');
+        
+        const permitBatchData = position.permitBatchData(
+          slippageTolerance,
+          positionManagerAddress,
+          Math.max(permit2Allowance0.nonce, permit2Allowance1.nonce),
+          deadline
+        );
+
+        console.log('Raw permit batch data from SDK:', permitBatchData);
+
+        const signature = await signPermit2Batch(permitBatchData);
+        console.log('Permit signature generated successfully');
+
+        mintOptions.batchPermit = {
+          owner: userAddress,
+          permitBatch: permitBatchData,
+          signature
+        };
+
+        console.log('Mint options with batch permit:', mintOptions);
+      }
+
+      // Step 4: Execute transaction
+      console.log('Generating call parameters...');
+      console.log('Position details:', {
+        token0: position.pool.token0.address,
+        token1: position.pool.token1.address,
+        tickLower: position.tickLower,
+        tickUpper: position.tickUpper,
+        liquidity: position.liquidity.toString()
+      });
+      console.log('Mint options:', mintOptions);
+
+      // Create a sanitized position object to avoid JSBI issues in addCallParameters
+      const sanitizedMintOptions = {
+        ...mintOptions,
+        // Ensure all numeric values are strings, not JSBI objects
+        deadline: mintOptions.deadline.toString ? mintOptions.deadline.toString() : mintOptions.deadline,
+      };
+
+      // If we have batchPermit, sanitize it too
+      if (sanitizedMintOptions.batchPermit) {
+        sanitizedMintOptions.batchPermit.permitBatch = {
+          ...sanitizedMintOptions.batchPermit.permitBatch,
+          sigDeadline: sanitizedMintOptions.batchPermit.permitBatch.sigDeadline.toString(),
+          details: sanitizedMintOptions.batchPermit.permitBatch.details.map((detail: any) => ({
+            ...detail,
+            amount: typeof detail.amount === 'string' ? detail.amount : detail.amount.toString(),
+            expiration: typeof detail.expiration === 'string' ? detail.expiration : detail.expiration.toString(),
+            nonce: typeof detail.nonce === 'string' ? detail.nonce : detail.nonce.toString(),
+          }))
+        };
+      }
+
+      console.log('Sanitized mint options:', sanitizedMintOptions);
+
+      const { calldata, value } = V4PositionManager.addCallParameters(position, sanitizedMintOptions);
+      console.log('Call parameters generated successfully');
+
+      let ethValue = BigInt(0);
+      if (isToken0Native) {
+        ethValue = parseUnits(cleanAmount0, 18);
+      } else if (isToken1Native) {
+        ethValue = parseUnits(cleanAmount1, 18);
+      }
+
       const hash = await walletClient.sendTransaction({
         to: positionManagerAddress as `0x${string}`,
         data: calldata as `0x${string}`,
-        value: correctValue, // Use our corrected value instead of SDK value
+        value: ethValue,
         account: userAddress as `0x${string}`,
         chain: getChainFromId(chainId),
       });
 
-      console.log('Transaction submitted:', hash);
-
-      // Wait for confirmation with longer timeout for testnet
-      console.log('Waiting for transaction confirmation...');
-      const receipt = await publicClient.waitForTransactionReceipt({ 
-        hash,
-        timeout: 60_000 // 60 seconds timeout for testnet
-      });
-      
-      console.log('Transaction receipt:', receipt);
-      
-      if (receipt.status === 'success') {
-        console.log('Position created successfully!');
-        return { success: true, hash };
-      } else if (receipt.status === 'reverted') {
-        console.log('Transaction was reverted');
-        return { success: false, error: 'Transaction was reverted by the contract' };
-      } else {
-        console.log('Transaction status unclear:', receipt.status);
-        return { success: false, error: `Transaction status: ${receipt.status}` };
+      // Minimal receipt checking to avoid excessive polling
+      try {
+        const receipt = await publicClient.waitForTransactionReceipt({ 
+          hash,
+          timeout: 120_000,
+          pollingInterval: 60_000, // Only poll every 60 seconds
+        });
+        
+        if (receipt.status === 'success') {
+          return { success: true, hash };
+        } else {
+          return { success: false, error: 'Transaction reverted' };
+        }
+      } catch (receiptError) {
+        // If receipt checking fails, still return success with hash
+        return { 
+          success: true, 
+          hash,
+          error: 'Transaction submitted but could not verify completion'
+        };
       }
 
     } catch (error: any) {
-      console.error('Error executing transaction:', error);
-      
-      // Provide specific error messages
-      if (error.message.includes('0x3b99b53d') || error.message.includes('InvalidSigner')) {
-        return { 
-          success: false, 
-          error: 'InvalidSigner error: This is likely due to using a smart contract wallet or signature verification issues. Please try using MetaMask or another EOA wallet.' 
-        };
-      } else if (error.message.includes('InsufficientBalance')) {
-        return { 
-          success: false, 
-          error: 'Insufficient token balance. Please ensure you have enough tokens and ETH for gas fees.' 
-        };
-      } else if (error.message.includes('DeadlinePassed')) {
-        return { 
-          success: false, 
-          error: 'Transaction deadline has passed. Please try again.' 
-        };
-      } else {
-        return { 
-          success: false, 
-          error: error.message || 'Transaction failed' 
-        };
-      }
+      return { success: false, error: error.message };
     } finally {
       setIsAddingLiquidity(false);
     }
   };
 
   return {
-    // New separated functions
     calculateRequiredAmounts,
     executeTransaction,
-    
-    // State
     isAddingLiquidity,
   };
 }

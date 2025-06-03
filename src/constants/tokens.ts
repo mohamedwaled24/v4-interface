@@ -18,6 +18,22 @@ export const UNICHAIN_SEPOLIA_TOKENS: Token[] = [
     logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png'
   },
   {
+    chainId: 130,
+    name: 'Mock A',
+    address: '0x9d13f44c940146f3fdee00768d373d24eaf9c6e5',
+    symbol: 'A',
+    decimals: 18,
+    logoURI: ''
+  },
+  {
+    chainId: 130,
+    name: 'Mock B',
+    address: '0x51ad0d703dfe9db5909303abbcf83f81b777e716',
+    symbol: 'B',
+    decimals: 18,
+    logoURI: ''
+  },
+  {
     chainId: 11155111,
     name: 'USDCoin',
     address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
