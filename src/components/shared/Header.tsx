@@ -1,6 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import styled from 'styled-components'
 import { useWallet } from '../../hooks/useWallet'
+import { SUPPORTED_NETWORKS } from '../../constants/networks'
+import { NetworkDropdown } from './NetworkDropdown'
 
 // Define interface for navigation types
 export enum NavType {
@@ -109,6 +111,7 @@ const AccountIcon = styled.div`
 `
 
 const NetworkIndicator = styled.div`
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -118,6 +121,11 @@ const NetworkIndicator = styled.div`
   padding: 6px 10px;
   font-size: ${({ theme }) => theme.fontSizes.small};
   font-weight: ${({ theme }) => theme.fontWeights.medium};
+  cursor: pointer;
+  
+  &:hover {
+    background: ${({ theme }) => theme.colors.backgroundOutline};
+  }
 `
 
 const NetworkDot = styled.div`
@@ -127,8 +135,112 @@ const NetworkDot = styled.div`
   background: ${({ theme }) => theme.colors.accentSuccess};
 `
 
+const NetworkOption = styled.div<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  background: ${({ $active, theme }) => $active ? theme.colors.backgroundModule : 'transparent'};
+  
+  &:hover {
+    background: ${({ theme }) => theme.colors.backgroundInteractive};
+  }
+`
+
+const NetworkName = styled.div`
+  font-size: ${({ theme }) => theme.fontSizes.medium};
+  font-weight: ${({ theme }) => theme.fontWeights.medium};
+  color: ${({ theme }) => theme.colors.neutral1};
+`
+
+const ActiveIndicator = styled.div`
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.accentSuccess};
+`
+
+const ChevronIcon = styled.span<{ $isOpen: boolean }>`
+  margin-left: 4px;
+  transform: ${({ $isOpen }) => ($isOpen ? 'rotate(180deg)' : 'rotate(0)')};
+  transition: transform 0.2s ease;
+`
+
+const NetworkDropdownComponent = () => {
+  const { network, chainId, switchNetwork } = useWallet()
+  const [isNetworkDropdownOpen, setIsNetworkDropdownOpen] = useState(false)
+  const networkDropdownRef = useRef<HTMLDivElement>(null)
+  
+  // Handle network switching
+  const handleNetworkSwitch = async (networkId: number) => {
+    if (networkId === chainId) {
+      setIsNetworkDropdownOpen(false)
+      return
+    }
+    
+    try {
+      await switchNetwork(networkId)
+      setIsNetworkDropdownOpen(false)
+    } catch (error) {
+      console.error('Failed to switch network:', error)
+    }
+  }
+  
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        networkDropdownRef.current && 
+        !networkDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsNetworkDropdownOpen(false)
+      }
+    }
+    
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
+  
+  return (
+    <div ref={networkDropdownRef}>
+      <NetworkIndicator onClick={() => setIsNetworkDropdownOpen(!isNetworkDropdownOpen)}>
+        {network && (
+          <>
+            <NetworkDot />
+            {network.name}
+            <ChevronIcon $isOpen={isNetworkDropdownOpen}>▾</ChevronIcon>
+          </>
+        )}
+        {!network && (
+          <>
+            Select Network
+            <ChevronIcon $isOpen={isNetworkDropdownOpen}>▾</ChevronIcon>
+          </>
+        )}
+      </NetworkIndicator>
+      
+      {/* <NetworkDropdown $isOpen={isNetworkDropdownOpen}>
+        {SUPPORTED_NETWORKS.map((net) => (
+          <NetworkOption 
+            key={net.id} 
+            $active={chainId === net.id}
+            onClick={() => handleNetworkSwitch(net.id)}
+          >
+            <NetworkName>{net.name}</NetworkName>
+            {chainId === net.id && <ActiveIndicator />}
+          </NetworkOption>
+        ))}
+      </NetworkDropdown> */}
+    </div>
+  )
+}
+
 export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
-  const { isConnected, address, network, connectWallet } = useWallet()
+  const { isConnected, address, connectWallet } = useWallet()
   const [isConnecting, setIsConnecting] = useState(false)
   
   const handleConnectWallet = async () => {
@@ -181,14 +293,9 @@ export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
       </NavLinks>
       
       <RightSection>
-        {network && (
-          <NetworkIndicator>
-            <NetworkDot />
-            {network.name}
-          </NetworkIndicator>
-        )}
+      <NetworkDropdown />
         
-        {isConnected && address ? (
+      {isConnected && address ? (
           <AccountButton>
             <AccountIcon>{address.charAt(2).toUpperCase()}</AccountIcon>
             {formatAddress(address)}

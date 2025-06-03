@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useWallet } from './useWallet'
 import { formatUnits } from 'viem'
+import { useDebounce } from 'use-debounce'
 
 const ERC20_ABI = [
   {
@@ -20,6 +21,8 @@ const ERC20_ABI = [
 ] as const
 
 export function useBalance(tokenAddress?: string) {
+
+  const [debouncedAddress] = useDebounce(tokenAddress, 500);
   const [balance, setBalance] = useState<string>('')
   const { publicClient, address } = useWallet()
 
@@ -67,10 +70,10 @@ export function useBalance(tokenAddress?: string) {
     }
 
     fetchBalance()
-    const interval = setInterval(fetchBalance, 15000) // Refresh every 15 seconds
+    const interval = setInterval(fetchBalance, 150000) // Refresh every 15 seconds
 
     return () => clearInterval(interval)
-  }, [publicClient, address, tokenAddress])
+  }, [publicClient, debouncedAddress, tokenAddress])
 
   return { balance }
 }

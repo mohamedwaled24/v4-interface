@@ -3,6 +3,7 @@ import { Token } from '../components/CreatePool/TokenSelector'
 import { FeeOption } from '../components/CreatePool/FeeSelector'
 import { isAddress } from 'viem'
 import { useWallet } from './useWallet'
+import poolManagerABI from '../../contracts/poolManager.json'
 
 // V4 Factory ABI (only the create pool function)
 const V4_FACTORY_ABI = [
