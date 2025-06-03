@@ -131,7 +131,7 @@ const IconBackground = styled.div`
   }
 `
 
-// New PoolId Input Section
+// Pool Key Input Section
 const PoolIdSection = styled.div`
   display: flex;
   flex-direction: column;
@@ -156,13 +156,15 @@ const PoolIdInputContainer = styled.div`
   }
 `
 
-const PoolIdInput = styled.input`
+const PoolKeyTextArea = styled.textarea`
   background: none;
   border: none;
   color: ${({ theme }) => theme.colors.neutral1};
-  font-size: 14px;
+  font-size: 12px;
   outline: none;
   width: 100%;
+  min-height: 80px;
+  resize: vertical;
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
   
   &::placeholder {
@@ -220,8 +222,18 @@ const ErrorMessage = styled.div`
   margin-top: 8px;
 `
 
+const SuccessMessage = styled.div`
+  color: ${({ theme }) => theme.colors.accentSuccess || '#4CAF50'};
+  font-size: 14px;
+  text-align: center;
+  margin-top: 8px;
+  padding: 8px;
+  background: ${({ theme }) => `${theme.colors.accentSuccess || '#4CAF50'}20`};
+  border-radius: 8px;
+`
+
 const LoadingOverlay = styled.div`
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
@@ -230,14 +242,33 @@ const LoadingOverlay = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 24px;
   backdrop-filter: blur(2px);
+  z-index: 1000;
+`
+
+const LoadingContainer = styled.div`
+  background: ${({ theme }) => theme.colors.backgroundModule};
+  padding: 32px;
+  border-radius: 16px;
+  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 300px;
 `
 
 const LoadingText = styled.div`
   color: ${({ theme }) => theme.colors.neutral1};
   font-size: 16px;
   font-weight: 500;
+  text-align: center;
+`
+
+const LoadingSubtext = styled.div`
+  color: ${({ theme }) => theme.colors.neutral2};
+  font-size: 14px;
+  text-align: center;
 `
 
 const ValidatingText = styled.div`
@@ -246,6 +277,14 @@ const ValidatingText = styled.div`
   margin-top: 4px;
   font-style: italic;
 `
+
+interface PoolKey {
+  currency0: string;
+  currency1: string;
+  fee: number;
+  tickSpacing: number;
+  hooks: string;
+}
 
 export function SwapForm() {
   const { isConnected, address, connectWallet, network } = useWallet()
@@ -267,7 +306,10 @@ export function SwapForm() {
   } = useV4Swap()
   
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [sellMode, setSellMode] = useState<boolean>(true)
+  const [selectedPoolKey, setSelectedPoolKey] = useState<PoolKey | null>(null)
+  const [poolKeyInput, setPoolKeyInput] = useState<string>('')
   
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
@@ -284,19 +326,22 @@ export function SwapForm() {
     }
     
     try {
+      setError(null);
+      setSuccessMessage(null);
+      
       const result = await executeSwap();
       
       if (!result.success) {
         setError(result.error || 'Swap failed');
       } else if (result.txHash) {
-        setError(null);
-        alert(`Swap successful! Transaction: ${result.txHash.slice(0, 10)}...`);
+        const shortHash = `${result.txHash.slice(0, 10)}...${result.txHash.slice(-8)}`;
+        setSuccessMessage(`Swap successful! Tx: ${shortHash}`);
         updateAmountIn('');
         
         // If we have pool info and a successful swap, add to deployed pools
-        if (poolInfo && swapState.poolId) {
+        if (poolInfo && selectedPoolKey) {
           const newPool: DeployedPool = {
-            poolId: swapState.poolId,
+            poolId: JSON.stringify(selectedPoolKey),
             token0Symbol: poolInfo.token0Symbol,
             token1Symbol: poolInfo.token1Symbol,
             fee: poolInfo.fee,
@@ -308,27 +353,27 @@ export function SwapForm() {
         }
       }
     } catch (error: any) {
+      console.error('Swap execution error:', error);
       setError(error.message || 'Swap failed');
     }
   }
   
   const getButtonText = () => {
     if (!isConnected) return 'Connect Wallet';
-    if (!swapState.poolId) return 'Enter Pool ID';
+    if (!selectedPoolKey) return 'Enter/Select Pool Key';
     if (isValidatingPool) return 'Validating Pool...';
-    if (!poolInfo) return 'Invalid Pool ID';
     if (!swapState.tokenIn) return 'Select input token';
     if (!swapState.tokenOut) return 'Select output token';
     if (!swapState.amountIn) return 'Enter an amount';
+    if (isSwapping) return 'Swapping...';
     return 'Swap';
   }
   
   const isButtonDisabled = () => {
     if (!isConnected) return false;
     return (
-      !swapState.poolId ||
+      !selectedPoolKey ||
       isValidatingPool ||
-      !poolInfo ||
       !swapState.tokenIn ||
       !swapState.tokenOut ||
       !swapState.amountIn ||
@@ -365,14 +410,33 @@ export function SwapForm() {
   }
   
   // Handle pool selection from the deployed pools list
-  const handleSelectPool = (poolId: string) => {
-    updatePoolId(poolId);
+  const handleSelectPool = (poolKey: PoolKey | string) => {
+    let parsedPoolKey: PoolKey;
+    let poolKeyString: string;
+    
+    if (typeof poolKey === 'string') {
+      try {
+        parsedPoolKey = JSON.parse(poolKey);
+        poolKeyString = poolKey;
+      } catch {
+        console.error('Invalid pool key format');
+        return;
+      }
+    } else {
+      parsedPoolKey = poolKey;
+      poolKeyString = JSON.stringify(poolKey, null, 2);
+    }
+    
+    setSelectedPoolKey(parsedPoolKey);
+    setPoolKeyInput(poolKeyString);
+    updatePoolId(poolKeyString);
   };
   
-  // Clear error when inputs change
+  // Clear messages when inputs change
   useEffect(() => {
     setError(null);
-  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, swapState.poolId]);
+    setSuccessMessage(null);
+  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, selectedPoolKey]);
   
   return (
     <Container>
@@ -397,20 +461,51 @@ export function SwapForm() {
             />
           </SwapHeader>
 
-          {/* Pool ID Input Section */}
+          {/* Pool Key Input Section */}
           <PoolIdSection>
             <PoolIdLabel>Pool Key</PoolIdLabel>
             <PoolIdInputContainer>
-              <PoolIdInput
-                placeholder="0x1234567890abcdef... (Enter the pool Key to swap through)"
-                value={swapState.poolId}
-                onChange={(e) => updatePoolId(e.target.value)}
+              <PoolKeyTextArea
+                placeholder='Paste pool key JSON here:
+{"currency0":"0x...","currency1":"0x...","fee":3000,"tickSpacing":60,"hooks":"0x0000..."}'
+                value={poolKeyInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setPoolKeyInput(value);
+                  
+                  if (value.trim() === '') {
+                    setSelectedPoolKey(null);
+                    updatePoolId('');
+                    return;
+                  }
+                  
+                  try {
+                    const parsedPoolKey = JSON.parse(value);
+                    if (parsedPoolKey.currency0 && parsedPoolKey.currency1 && typeof parsedPoolKey.fee === 'number' && typeof parsedPoolKey.tickSpacing === 'number') {
+                      setSelectedPoolKey(parsedPoolKey);
+                      updatePoolId(value);
+                      console.log('Valid pool key set:', parsedPoolKey);
+                    } else {
+                      console.log('Invalid pool key structure:', parsedPoolKey);
+                      setSelectedPoolKey(null);
+                    }
+                  } catch (error) {
+                    // Invalid JSON, keep the input but don't set selectedPoolKey
+                    console.log('JSON parse error:', error);
+                    setSelectedPoolKey(null);
+                  }
+                }}
               />
             </PoolIdInputContainer>
+            {selectedPoolKey && (
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                ✓ Valid Pool: {selectedPoolKey.currency0.slice(0, 6)}...{selectedPoolKey.currency0.slice(-4)} / {selectedPoolKey.currency1.slice(0, 6)}...{selectedPoolKey.currency1.slice(-4)} | Fee: {(selectedPoolKey.fee / 10000).toFixed(2)}%
+              </div>
+            )}
             {isValidatingPool && (
               <ValidatingText>Validating pool...</ValidatingText>
             )}
-            {poolInfo && (
+            {poolInfo && selectedPoolKey && (
               <PoolInfoContainer>
                 <PoolInfoTitle>
                   {poolInfo.token0Symbol}/{poolInfo.token1Symbol} Pool
@@ -493,15 +588,22 @@ export function SwapForm() {
           </ActionButton>
           
           {error && <ErrorMessage>{error}</ErrorMessage>}
+          {successMessage && <SuccessMessage>{successMessage}</SuccessMessage>}
         </SwapContainer>
       </MainContent>
       
       {/* Deployed Pools List */}
       <DeployedPoolsList onSelectPool={handleSelectPool} />
       
+      {/* Loading Overlay */}
       {isSwapping && (
         <LoadingOverlay>
-          <LoadingText>Swapping...</LoadingText>
+          <LoadingContainer>
+            <LoadingText>Executing V4 Swap</LoadingText>
+            <LoadingSubtext>
+              Please confirm the transaction in your wallet...
+            </LoadingSubtext>
+          </LoadingContainer>
         </LoadingOverlay>
       )}
     </Container>

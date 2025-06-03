@@ -331,24 +331,24 @@ export function CreatePoolForm() {
         hooks: poolState.hookAddress || '0x0000000000000000000000000000000000000000'
       };
 
-      const encodedPoolKey = encodeAbiParameters(
-        [
-          { name: 'currency0', type: 'address' },
-          { name: 'currency1', type: 'address' },
-          { name: 'fee', type: 'uint24' },
-          { name: 'tickSpacing', type: 'int24' },
-          { name: 'hooks', type: 'address' }
-        ],
-        [
-          poolKey.currency0 as `0x${string}`,
-          poolKey.currency1 as `0x${string}`,
-          poolKey.fee,
-          poolKey.tickSpacing,
-          poolKey.hooks as `0x${string}`
-        ]
-      );
+      // const encodedPoolKey = encodeAbiParameters(
+      //   [
+      //     { name: 'currency0', type: 'address' },
+      //     { name: 'currency1', type: 'address' },
+      //     { name: 'fee', type: 'uint24' },
+      //     { name: 'tickSpacing', type: 'int24' },
+      //     { name: 'hooks', type: 'address' }
+      //   ],
+      //   [
+      //     poolKey.currency0 as `0x${string}`,
+      //     poolKey.currency1 as `0x${string}`,
+      //     poolKey.fee,
+      //     poolKey.tickSpacing,
+      //     poolKey.hooks as `0x${string}`
+      //   ]
+      // );
 
-      addDeployedPool(encodedPoolKey);
+      addDeployedPool(JSON.stringify(poolKey));
 
       const poolId = generatePoolId({
         currency0: poolState.token0?.address || '',
