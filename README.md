@@ -43,6 +43,59 @@ Start the development server:
 yarn start
 ```
 
+## Files to modify
+
+### Adding different chains:
+ - You can modify the chain details in the src/constants/networks.ts
+
+   For example:
+   ```TypeScript
+   id: 1,
+    name: 'Ethereum',
+    nativeCurrency: {
+      name: 'Ether',
+      symbol: 'ETH',
+      decimals: 18,
+    },
+    rpcUrls: {
+      default: {
+        http: [import.meta.env.VITE_MAINNET_RPC_URL]
+      },
+      public: {
+        http: [import.meta.env.VITE_MAINNET_RPC_URL]
+      }
+    }
+   ```
+   And add the relevant RPC URL in your .env file (like VITE_MAINNET_RPC_URL).
+
+### Adding different tokens:
+ - You can modify the token list in src/constants/tokens.ts
+
+   For example:
+   ```TypeScript
+    {
+    chainId: 130,
+    name: 'Ether',
+    address: '0x0000000000000000000000000000000000000000',
+    symbol: 'ETH',
+    decimals: 18,
+    logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png'
+   }
+   ```
+
+### Adding list of contracts as per netowork:
+ - You can modify the contracts list in src/constants/contracts.ts
+
+   For example:
+   ```TypeScript
+   11155111: {
+    PoolManager: '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543',
+    PositionManager: '0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4',
+    StateView: '0xe1dd9c3fa50edb962e442f60dfbc432e24537e4c',
+    UniversalRouter: '0x3a9d48ab9751398bbfa63ad67599bb04e4bdf98b',
+   }
+   ```
+
 ## Key Features
 
 *   **Uniswap V4 Pool Interaction:**
