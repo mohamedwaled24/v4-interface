@@ -106,27 +106,27 @@ interface ExecuteTransactionResult {
 }
 
 // Helper function to ensure proper number formatting for MetaMask
-const formatNumberForMetaMask = (value: any): string => {
-  // Handle arrays - this might be the issue
-  if (Array.isArray(value)) {
-    console.warn('Array passed to formatNumberForMetaMask:', value);
-    return value[0]?.toString() || '0';
-  }
+// const formatNumberForMetaMask = (value: any): string => {
+//   // Handle arrays - this might be the issue
+//   if (Array.isArray(value)) {
+//     console.warn('Array passed to formatNumberForMetaMask:', value);
+//     return value[0]?.toString() || '0';
+//   }
   
-  if (typeof value === 'bigint') {
-    return value.toString();
-  }
-  if (typeof value === 'number') {
-    return value.toString();
-  }
-  if (typeof value === 'string') {
-    // Remove any locale-specific formatting and ensure proper decimal format
-    return value.replace(/,/g, '');
-  }
+//   if (typeof value === 'bigint') {
+//     return value.toString();
+//   }
+//   if (typeof value === 'number') {
+//     return value.toString();
+//   }
+//   if (typeof value === 'string') {
+//     // Remove any locale-specific formatting and ensure proper decimal format
+//     return value.replace(/,/g, '');
+//   }
   
-  console.warn('Unexpected value type in formatNumberForMetaMask:', typeof value, value);
-  return String(value);
-};
+//   console.warn('Unexpected value type in formatNumberForMetaMask:', typeof value, value);
+//   return String(value);
+// };
 
 export function useV4Position() {
   const { publicClient, walletClient, chainId, address, isConnected, network } = useWallet()

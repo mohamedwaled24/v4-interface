@@ -1,44 +1,16 @@
 import { useState, useCallback } from 'react'
 import { useWallet } from './useWallet'
-import { parseUnits, keccak256, encodePacked, encodeAbiParameters } from 'viem'
+import { parseUnits, keccak256, encodePacked, encodeAbiParameters, maxUint256, encodeFunctionData, getAddress } from 'viem'
+import { SUPPORTED_NETWORKS } from '../constants/networks'
 import { CONTRACTS } from '../constants/contracts'
-import { Actions } from '@uniswap/v4-sdk'
+import { V4Planner, Actions } from '@uniswap/v4-sdk'
+import { Token as SDKToken, Currency, TradeType, Percent, CurrencyAmount } from '@uniswap/sdk-core'
 import universalRouterAbi from '../../contracts/universalRouter.json'
+import permit2Abi from '../../contracts/permit2.json'
+import { ERC20_ABI } from '../../contracts/ERC20_ABI'
 
-// Import the ABI properly - it might be the default export or have a different structure
-// let universalRouterAbi: any;
-// try {
-//   universalRouterAbi = require('../../contracts/universalRouter.json');
-// } catch (error) {
-//   console.error('Failed to load Universal Router ABI:', error);
-//   universalRouterAbi = { abi: [] };
-// }
 
-// Fallback ABI for Universal Router if the JSON file isn't working
-const UNIVERSAL_ROUTER_ABI = [
-  {
-    "inputs": [
-      {"name": "commands", "type": "bytes"},
-      {"name": "inputs", "type": "bytes[]"}
-    ],
-    "name": "execute",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {"name": "commands", "type": "bytes"},
-      {"name": "inputs", "type": "bytes[]"},
-      {"name": "deadline", "type": "uint256"}
-    ],
-    "name": "execute",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  }
-] as const;
-
+//TO-DO: Swapping tokens and sending to a recepient, Multi Hop swap
 export interface Token {
   address: string
   symbol: string
@@ -86,445 +58,389 @@ interface SwapResult {
   txHash?: string
 }
 
-// V4 Universal Router Commands
-const Commands = {
+// V4 Universal Router Commands - following SDK pattern
+const CommandType = {
   V4_SWAP: 0x10
 } as const
 
-// Generate pool ID from pool key (V4 style)
-const generatePoolIdFromKey = (poolKey: PoolKey): string => {
-  const encoded = encodePacked(
-    ['address', 'address', 'uint24', 'int24', 'address'],
-    [
-      poolKey.currency0 as `0x${string}`,
-      poolKey.currency1 as `0x${string}`,
-      poolKey.fee,
-      poolKey.tickSpacing,
-      poolKey.hooks as `0x${string}`
-    ]
-  );
-  return keccak256(encoded);
-}
+const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+
+const PERMIT2_DOMAIN = {
+  name: 'Permit2',
+  chainId: 0,
+  verifyingContract: PERMIT2_ADDRESS as `0x${string}`
+};
+
+const PERMIT2_BATCH_TYPES = {
+  PermitBatch: [
+    { name: 'details', type: 'PermitDetails[]' },
+    { name: 'spender', type: 'address' },
+    { name: 'sigDeadline', type: 'uint256' }
+  ],
+  PermitDetails: [
+    { name: 'token', type: 'address' },
+    { name: 'amount', type: 'uint160' },
+    { name: 'expiration', type: 'uint48' },
+    { name: 'nonce', type: 'uint48' }
+  ]
+};
 
 export function useV4Swap() {
-  const { publicClient, walletClient, address, chainId } = useWallet()
-  const [isSwapping, setIsSwapping] = useState(false)
-  const [isValidatingPool, setIsValidatingPool] = useState(false)
-  const [poolInfo, setPoolInfo] = useState<PoolInfo | null>(null)
-  
+  const { publicClient, walletClient, chainId, address, isConnected, network } = useWallet()
+
+  const getChainFromId = (chainId: number) => {
+    const network = SUPPORTED_NETWORKS.find(net => net.id === chainId);
+    if (!network) {
+      throw new Error(`Unsupported chain ID: ${chainId}`);
+    }
+    return network;
+  };
+
+  const isNativeToken = (tokenAddress: string): boolean => {
+    return tokenAddress === '0x0000000000000000000000000000000000000000' ||
+           tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+  };
+
+  const approveTokenToPermit2 = async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
+    if (!walletClient || !publicClient || isNativeToken(tokenAddress)) {
+      return { success: true };
+    }
+
+    try {
+      const currentAllowance = await publicClient.readContract({
+        address: tokenAddress as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: 'allowance',
+        args: [address as `0x${string}`, PERMIT2_ADDRESS as `0x${string}`]
+      });
+
+      if (currentAllowance >= amount) {
+        return { success: true };
+      }
+
+      const data = encodeFunctionData({
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [PERMIT2_ADDRESS as `0x${string}`, maxUint256]
+      });
+
+      const hash = await walletClient.sendTransaction({
+        to: tokenAddress as `0x${string}`,
+        data,
+        account: address as `0x${string}`,
+        chain: getChainFromId(chainId!),
+      });
+
+      await publicClient.waitForTransactionReceipt({ hash });
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const checkPermit2Allowance = async (tokenAddress: string, spender: string): Promise<{ amount: bigint; expiration: number; nonce: number }> => {
+    if (!publicClient || !address || isNativeToken(tokenAddress)) {
+      return { amount: BigInt(0), expiration: 0, nonce: 0 };
+    }
+
+    try {
+      const result = await publicClient.readContract({
+        address: PERMIT2_ADDRESS as `0x${string}`,
+        abi: permit2Abi.abi,
+        functionName: 'allowance',
+        args: [address as `0x${string}`, tokenAddress as `0x${string}`, spender as `0x${string}`]
+      });
+
+      return {
+        amount: result[0] as bigint,
+        expiration: Number(result[1]),
+        nonce: Number(result[2])
+      };
+    } catch (error) {
+      return { amount: BigInt(0), expiration: 0, nonce: 0 };
+    }
+  };
+
+  const signPermit2Batch = async (permitBatch: any): Promise<string> => {
+    if (!walletClient) {
+      throw new Error('Wallet not available');
+    }
+
+    const domain = {
+      ...PERMIT2_DOMAIN,
+      chainId: chainId!
+    };
+
+    // Helper function to extract value from JSBI or other complex objects
+    const extractNumericValue = (value: any): string => {
+      // Handle JSBI objects specifically
+      if (value && typeof value === 'object') {
+        // Check if it's a JSBI instance by looking for JSBI-specific methods/properties
+        if (value.constructor && (value.constructor.name === 'JSBI' || value.constructor.name === '_JSBI')) {
+          // Use JSBI's toString method
+          return value.toString();
+        }
+        
+        // Check if it has a toString method that returns a valid number string
+        if (typeof value.toString === 'function') {
+          const stringValue = value.toString();
+          // Verify it's a valid number string (not "[object Object]")
+          if (/^\d+$/.test(stringValue)) {
+            return stringValue;
+          }
+        }
+        
+        // If it's an object with a 'words' array (BigNumber-like structure)
+        if (value.words && Array.isArray(value.words)) {
+          // Try to convert BigNumber-like object to string
+          try {
+            return value.toString();
+          } catch (e) {
+            console.warn('Failed to convert BigNumber-like object:', value);
+          }
+        }
+        
+        // Handle regular arrays (fallback)
+        if (Array.isArray(value)) {
+          return value[0]?.toString() || '0';
+        }
+      }
+      
+      // Handle regular numbers, bigints, strings
+      if (typeof value === 'bigint') {
+        return value.toString();
+      }
+      
+      if (typeof value === 'number') {
+        return value.toString();
+      }
+      
+      if (typeof value === 'string') {
+        return value.replace(/,/g, '');
+      }
+      
+      // Last resort
+      console.warn('Unexpected value type in extractNumericValue:', typeof value, value);
+      return '0';
+    };
+
+    // Deep clone and sanitize the permit batch data
+    const sanitizedPermitBatch = {
+      spender: permitBatch.spender,
+      sigDeadline: extractNumericValue(permitBatch.sigDeadline),
+      details: permitBatch.details.map((detail: any) => {
+        console.log('Original detail:', detail);
+        console.log('Amount type and constructor:', typeof detail.amount, detail.amount?.constructor?.name);
+        console.log('Amount methods:', detail.amount && typeof detail.amount === 'object' ? Object.getOwnPropertyNames(detail.amount) : 'N/A');
+        
+        const sanitizedDetail = {
+          token: detail.token,
+          amount: extractNumericValue(detail.amount),
+          expiration: extractNumericValue(detail.expiration),
+          nonce: extractNumericValue(detail.nonce)
+        };
+        
+        console.log('Sanitized detail:', sanitizedDetail);
+        return sanitizedDetail;
+      })
+    };
+
+    console.log('Final sanitized permit batch:', sanitizedPermitBatch);
+
+    const signature = await walletClient.signTypedData({
+      account: address as `0x${string}`,
+      domain,
+      types: PERMIT2_BATCH_TYPES,
+      primaryType: 'PermitBatch',
+      message: sanitizedPermitBatch
+    });
+
+    return signature;
+  };
+
+  const executeSwap = async (swapParameters: {
+    poolKey: PoolKey;
+    tokenIn: Token;
+    tokenOut: Token;
+    amountIn: string;
+    amountOutMinimum: string;
+    recipient?: string;
+    deadline?: number;
+    usePermit?: boolean;
+  }): Promise<SwapResult> => {
+    if (!isConnected || !walletClient || !publicClient || !chainId) {
+      return { success: false, error: 'Wallet not connected' };
+    }
+
+    try {
+      const { poolKey, tokenIn, tokenOut, amountIn, amountOutMinimum, recipient, deadline, usePermit } = swapParameters;
+      
+      const swapDeadline = deadline || Math.floor(Date.now() / 1000) + 1800; // 30 minutes
+      
+      // Parse amounts
+      const amountInWei = parseUnits(amountIn.replace(/,/g, ''), tokenIn.decimals);
+      const amountOutMinWei = parseUnits(amountOutMinimum.replace(/,/g, ''), tokenOut.decimals);
+      
+      const universalRouterAddress = CONTRACTS[chainId as keyof typeof CONTRACTS]?.UniversalRouter;
+      if (!universalRouterAddress) {
+        return { success: false, error: 'Universal Router not available on this chain' };
+      }
+
+      // Step 1: Handle approvals/permits for non-native tokens
+      if (!isNativeToken(tokenIn.address)) {
+        if (usePermit) {
+          // Check if permit is needed
+          const permit2Allowance = await checkPermit2Allowance(tokenIn.address, universalRouterAddress);
+          const now = Math.floor(Date.now() / 1000);
+          
+          if (permit2Allowance.amount < amountInWei || permit2Allowance.expiration < now) {
+            // First approve token to Permit2
+            const approval = await approveTokenToPermit2(tokenIn.address, amountInWei);
+            if (!approval.success) {
+              return { success: false, error: approval.error };
+            }
+          }
+        } else {
+          // Traditional approval
+          const approval = await approveTokenToPermit2(tokenIn.address, amountInWei);
+          if (!approval.success) {
+            return { success: false, error: approval.error };
+          }
+        }
+      }
+
+      // Step 2: Skip SDK Currency objects - we don't actually need them for V4Planner
+      // The V4Planner works directly with addresses from the poolKey
+      
+      // Step 3: Skip CurrencyAmount objects - not needed for direct V4Planner usage
+
+      // Step 4: Create V4Planner with exact test pattern
+      const v4Planner = new V4Planner();
+      
+      // Determine zeroForOne based on poolKey currencies (already ordered)
+      const zeroForOne = poolKey.currency0.toLowerCase() === tokenIn.address.toLowerCase();
+      
+      // Add swap action - exact match to test pattern
+      v4Planner.addAction(Actions.SWAP_EXACT_IN_SINGLE, [
+        {
+          poolKey: poolKey,
+          zeroForOne: zeroForOne,
+          amountIn: amountInWei,
+          amountOutMinimum: amountOutMinWei,
+          hookData: '0x'
+        }
+      ]);
+      
+      // Add settle all - use poolKey currency addresses
+      v4Planner.addAction(Actions.SETTLE_ALL, [
+        zeroForOne ? poolKey.currency0 : poolKey.currency1, // Input currency from poolKey
+        maxUint256 // Use MAX_UINT like in tests
+      ]);
+      
+      // Add take all - use poolKey currency addresses  
+      v4Planner.addAction(Actions.TAKE_ALL, [
+        zeroForOne ? poolKey.currency1 : poolKey.currency0, // Output currency from poolKey
+        BigInt(0) // Use 0 like in tests
+      ]);
+      
+      // Step 5: Access actions and params directly like in tests
+      const encodedActions = v4Planner.actions;
+      const encodedParams = v4Planner.params;
+      
+      // Step 6: Create Universal Router command exactly like tests
+      const commands = encodePacked(['uint8'], [CommandType.V4_SWAP]);
+      
+      // Step 7: Properly structure inputs - combine actions and params into single input
+      const combinedInput = encodeAbiParameters(
+        [{ name: 'actions', type: 'bytes' }, { name: 'params', type: 'bytes[]' }],
+        [encodedActions, encodedParams]
+      );
+      const inputs = [combinedInput];
+      
+      // Step 8: Calculate ETH value for native token swaps
+      let ethValue = BigInt(0);
+      if (isNativeToken(tokenIn.address)) {
+        ethValue = amountInWei;
+      }
+
+      // Step 9: Execute the swap with proper 3-parameter structure
+      const hash = await walletClient.sendTransaction({
+        to: universalRouterAddress as `0x${string}`,
+        data: encodeFunctionData({
+          abi: universalRouterAbi.abi,
+          functionName: 'execute',
+          args: [commands, inputs, swapDeadline]
+        }),
+        value: ethValue,
+        account: address as `0x${string}`,
+        chain: getChainFromId(chainId),
+      });
+
+      // Wait for transaction receipt
+      const receipt = await publicClient.waitForTransactionReceipt({ 
+        hash,
+        timeout: 120_000,
+      });
+
+      if (receipt.status === 'success') {
+        return { success: true, txHash: hash };
+      } else {
+        return { success: false, error: 'Transaction reverted' };
+      }
+
+    } catch (error: any) {
+      console.error('Swap execution error:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  // State management for the swap form
   const [swapState, setSwapState] = useState<SwapState>({
     tokenIn: null,
     tokenOut: null,
     amountIn: '',
     amountOut: '',
     poolKey: null,
-    slippageTolerance: 0.5,
-    deadline: 20,
-  })
-  
-  const [validation, setValidation] = useState<SwapValidation>({})
+    slippageTolerance: 50, // 0.5%
+    deadline: Math.floor(Date.now() / 1000) + 1800 // 30 minutes
+  });
 
-  const validateSwap = useCallback((): boolean => {
-    const errors: SwapValidation = {}
+  const [validation, setValidation] = useState<SwapValidation>({});
+  const [isSwapping, setIsSwapping] = useState(false);
+  const [isValidatingPool, setIsValidatingPool] = useState(false);
+  const [poolInfo, setPoolInfo] = useState<PoolInfo | null>(null);
 
-    if (!swapState.tokenIn) {
-      errors.tokenInError = 'Select input token'
-    }
-    if (!swapState.tokenOut) {
-      errors.tokenOutError = 'Select output token'
-    }
-    if (swapState.tokenIn && swapState.tokenOut && 
-        swapState.tokenIn.address.toLowerCase() === swapState.tokenOut.address.toLowerCase()) {
-      errors.tokenInError = 'Tokens must be different'
-      errors.tokenOutError = 'Tokens must be different'
-    }
-    if (!swapState.amountIn || parseFloat(swapState.amountIn) <= 0) {
-      errors.amountInError = 'Enter amount'
-    }
-    if (!swapState.poolKey) {
-      errors.poolIdError = 'Select pool'
-    }
-
-    setValidation(errors)
-    return Object.keys(errors).length === 0
-  }, [swapState])
-
-  // Basic quote calculation - replace with actual V4 SDK or price oracle in production
-  const calculateAmountOut = useCallback(async (
-    amountIn: string,
-    tokenIn: Token,
-    tokenOut: Token,
-    poolKey: PoolKey
-  ): Promise<string> => {
-    if (!amountIn || parseFloat(amountIn) <= 0) {
-      return '0'
-    }
-    try {
-      // Simple fee-based calculation - NOT for production use
-      let amountInFloat = parseFloat(amountIn)
-      let amountOut = amountInFloat
-      const feeRate = poolKey.fee / 1_000_000
-      amountOut = amountOut * (1 - feeRate)
-      return amountOut.toFixed(Math.min(tokenOut.decimals, 8))
-    } catch (error) {
-      console.error('Error calculating amount out:', error)
-      return '0'
-    }
-  }, [])
-
-  const executeSwap = useCallback(async (): Promise<SwapResult> => {
-    if (!validateSwap()) {
-      return { success: false, error: 'Invalid swap parameters' }
-    }
-    const { tokenIn, tokenOut, amountIn, poolKey, slippageTolerance, deadline } = swapState;
-    if (!tokenIn || !tokenOut || !poolKey || !walletClient || !publicClient || !address || !chainId) {
-      return { success: false, error: 'Missing requirements' }
-    }
-    const contracts = CONTRACTS[chainId as keyof typeof CONTRACTS];
-    if (!contracts?.UniversalRouter) {
-      return { success: false, error: `UniversalRouter not available for chain ${chainId}` };
-    }
-    setIsSwapping(true);
-    try {
-      // Parse input amount
-      const parsedAmountIn = parseUnits(amountIn, tokenIn.decimals);
-
-      // Calculate minimum output amount (for slippage protection)
-      const calculatedAmountOut = await calculateAmountOut(amountIn, tokenIn, tokenOut, poolKey);
-      const minAmountOut = parseUnits(
-        (parseFloat(calculatedAmountOut) * (1 - slippageTolerance / 100)).toString(),
-        tokenOut.decimals
-      );
-
-      // Check if input token needs approval (skip for native ETH)
-      const isNativeInput = tokenIn.address === '0x0000000000000000000000000000000000000000';
-      if (!isNativeInput) {
-        const ERC20_ABI = [
-          {
-            inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }],
-            name: 'allowance',
-            outputs: [{ name: '', type: 'uint256' }],
-            stateMutability: 'view',
-            type: 'function'
-          }
-        ] as const;
-
-        const allowance = await publicClient.readContract({
-          address: tokenIn.address as `0x${string}`,
-          abi: ERC20_ABI,
-          functionName: 'allowance',
-          args: [address as `0x${string}`, contracts.UniversalRouter as `0x${string}`]
-        });
-
-        if (allowance < parsedAmountIn) {
-          return { 
-            success: false, 
-            error: `Insufficient allowance. Please approve ${tokenIn.symbol} for UniversalRouter first.` 
-          };
-        }
-      }
-
-      // Prepare Universal Router call with proper V4 structure
-      const swapDeadline = BigInt(Math.floor(Date.now() / 1000) + (deadline * 60));
-      
-      // Determine swap direction
-      const zeroForOne = tokenIn.address.toLowerCase() === poolKey.currency0.toLowerCase();
-
-      // Debug Actions to see actual values
-      console.log('Available Actions:', Actions);
-      console.log('SWAP_EXACT_IN_SINGLE:', Actions.SWAP_EXACT_IN_SINGLE);
-      console.log('SETTLE_ALL:', Actions.SETTLE_ALL);
-      console.log('TAKE_ALL:', Actions.TAKE_ALL);
-
-      // Check if Actions are properly imported
-      if (Actions.SWAP_EXACT_IN_SINGLE === undefined || Actions.SETTLE_ALL === undefined || Actions.TAKE_ALL === undefined) {
-        throw new Error('Actions constants not properly imported from @uniswap/v4-sdk');
-      }
-
-      const commandBytes = `0x${Commands.V4_SWAP.toString(16).padStart(2, '0')}` as `0x${string}`;
-      
-      // V4Router Actions sequence for exact input single swap
-      const actions = new Uint8Array([
-        Actions.SWAP_EXACT_IN_SINGLE,
-        Actions.SETTLE_ALL,
-        Actions.TAKE_ALL
-      ]);
-
-      // Parameters for each action
-      const params: `0x${string}`[] = [];
-
-      // Action 0: SWAP_EXACT_IN_SINGLE - the actual swap parameters
-      params[0] = encodeAbiParameters(
-        [
-          {
-            components: [
-              { name: 'currency0', type: 'address' },
-              { name: 'currency1', type: 'address' },
-              { name: 'fee', type: 'uint24' },
-              { name: 'tickSpacing', type: 'int24' },
-              { name: 'hooks', type: 'address' }
-            ],
-            name: 'poolKey',
-            type: 'tuple'
-          },
-          { name: 'zeroForOne', type: 'bool' },
-          { name: 'amountIn', type: 'uint128' },
-          { name: 'amountOutMinimum', type: 'uint128' },
-          { name: 'hookData', type: 'bytes' }
-        ],
-        [
-          {
-            currency0: poolKey.currency0 as `0x${string}`,
-            currency1: poolKey.currency1 as `0x${string}`,
-            fee: poolKey.fee,
-            tickSpacing: poolKey.tickSpacing,
-            hooks: poolKey.hooks as `0x${string}`
-          },
-          zeroForOne,
-          BigInt(parsedAmountIn.toString()),
-          BigInt(minAmountOut.toString()),
-          '0x' as `0x${string}`
-        ]
-      );
-
-      // Action 1: SETTLE_ALL - settle the input currency (simplified parameters)
-      params[1] = encodeAbiParameters(
-        [{ name: 'currency', type: 'address' }],
-        [zeroForOne ? poolKey.currency0 as `0x${string}` : poolKey.currency1 as `0x${string}`]
-      );
-
-      // Action 2: TAKE_ALL - take the output currency (simplified parameters)
-      params[2] = encodeAbiParameters(
-        [{ name: 'currency', type: 'address' }],
-        [zeroForOne ? poolKey.currency1 as `0x${string}` : poolKey.currency0 as `0x${string}`]
-      );
-
-      // Encode actions as bytes
-      const actionsBytes = `0x${Array.from(actions).map(b => b.toString(16).padStart(2, '0')).join('')}` as `0x${string}`;
-
-      // Create the input for Universal Router
-      const routerInput = encodeAbiParameters(
-        [
-          { name: 'actions', type: 'bytes' },
-          { name: 'params', type: 'bytes[]' }
-        ],
-        [actionsBytes, params]
-      );
-
-      const inputs = [routerInput];
-
-      console.log('V4 Swap parameters:', {
-        commandBytes,
-        actionsBytes,
-        actions: Array.from(actions),
-        zeroForOne,
-        parsedAmountIn: parsedAmountIn.toString(),
-        minAmountOut: minAmountOut.toString(),
-        deadline: swapDeadline.toString(),
-        poolKey,
-        inputsLength: inputs.length,
-        routerInput
-      });
-
-      console.log('Attempting to call Universal Router execute function...');
-      console.log('Contract address:', contracts.UniversalRouter);
-      console.log('Command bytes:', commandBytes);
-      console.log('Inputs array length:', inputs.length);
-      console.log('Deadline:', swapDeadline.toString());
-      console.log('Is native input:', isNativeInput);
-      console.log('Value to send:', isNativeInput ? parsedAmountIn.toString() : '0');
-
-      // Debug each parameter individually
-      console.log('Parameter debugging:');
-      console.log('- commandBytes type:', typeof commandBytes, 'value:', commandBytes);
-      console.log('- inputs type:', typeof inputs, 'array?', Array.isArray(inputs), 'length:', inputs?.length);
-      console.log('- inputs[0] type:', typeof inputs[0], 'value length:', inputs[0]?.length);
-      console.log('- swapDeadline type:', typeof swapDeadline, 'value:', swapDeadline.toString());
-      console.log('- address type:', typeof address, 'value:', address);
-
-      // Try to find the execute function in the ABI
-      const executeFunctions = universalRouterAbi.abi.filter((item: any) => 
-        item.type === 'function' && item.name === 'execute'
-      );
-      console.log('Execute functions found in ABI:', executeFunctions.length);
-      executeFunctions.forEach((func: any, index: number) => {
-        console.log(`Execute function ${index}:`, {
-          inputs: func.inputs?.length,
-          inputTypes: func.inputs?.map((input: any) => input.type)
-        });
-      });
-
-      // Simple parameter validation
-      if (!commandBytes || typeof commandBytes !== 'string' || !commandBytes.startsWith('0x')) {
-        throw new Error(`Invalid commandBytes: ${commandBytes}`);
-      }
-      if (!Array.isArray(inputs) || inputs.length === 0) {
-        throw new Error(`Invalid inputs array: ${inputs}`);
-      }
-      if (!inputs[0] || typeof inputs[0] !== 'string' || !inputs[0].startsWith('0x')) {
-        throw new Error(`Invalid inputs[0]: ${inputs[0]}`);
-      }
-
-      // Try a very simple test call first
-      try {
-        console.log('Testing simple contract call...');
-        const testCall = await publicClient.simulateContract({
-          address: contracts.UniversalRouter as `0x${string}`,
-          abi: [
-            {
-              "inputs": [
-                {"name": "commands", "type": "bytes"},
-                {"name": "inputs", "type": "bytes[]"}
-              ],
-              "name": "execute",
-              "outputs": [],
-              "stateMutability": "payable",
-              "type": "function"
-            }
-          ],
-          functionName: 'execute',
-          args: [
-            commandBytes,
-            inputs
-          ],
-          account: address as `0x${string}`,
-          value: isNativeInput ? parsedAmountIn : BigInt(0)
-        });
-        console.log('Simple test call succeeded');
-      } catch (testError: any) {
-        console.log('Simple test call failed:', testError.message);
-        throw new Error(`Contract call failed with simplified ABI: ${testError.message}`);
-      }
-
-      // Execute the swap through Universal Router
-      // Try the 2-parameter version first
-      let request;
-      try {
-        ({ request } = await publicClient.simulateContract({
-          address: contracts.UniversalRouter as `0x${string}`,
-          abi: universalRouterAbi.abi,
-          functionName: 'execute',
-          args: [
-            commandBytes,
-            inputs
-          ],
-          account: address as `0x${string}`,
-          value: isNativeInput ? parsedAmountIn : BigInt(0)
-        }));
-        console.log('2-parameter execute succeeded');
-      } catch (error: any) {
-        console.log('2-parameter execute failed:', error.message);
-        // Try the 3-parameter version
-        ({ request } = await publicClient.simulateContract({
-          address: contracts.UniversalRouter as `0x${string}`,
-          abi: universalRouterAbi.abi,
-          functionName: 'execute',
-          args: [
-            commandBytes,
-            inputs,
-            swapDeadline
-          ],
-          account: address as `0x${string}`,
-          value: isNativeInput ? parsedAmountIn : BigInt(0)
-        }));
-        console.log('3-parameter execute succeeded');
-      }
-
-      // Execute the transaction
-      const hash = await walletClient.writeContract(request);
-      const receipt = await publicClient.waitForTransactionReceipt({ 
-        hash,
-        timeout: 60_000
-      });
-
-      if (receipt.status === 'success') {
-        setSwapState(prev => ({ ...prev, amountOut: calculatedAmountOut }));
-        return { success: true, txHash: hash };
-      } else {
-        return { success: false, error: 'Transaction failed' };
-      }
-    } catch (error: any) {
-      console.error('V4 Swap error:', error);
-      return {
-        success: false,
-        error: error.message || 'Swap failed'
-      };
-    } finally {
-      setIsSwapping(false);
-    }
-  }, [walletClient, publicClient, address, chainId, swapState, validateSwap, calculateAmountOut])
-
-  const updateTokenIn = useCallback((token: Token | null) => {
+  // Update functions
+  const updateTokenIn = (token: Token | null) => {
     setSwapState(prev => ({ ...prev, tokenIn: token }));
-    setValidation(prev => ({ ...prev, tokenInError: undefined }));
-  }, [])
+  };
 
-  const updateTokenOut = useCallback((token: Token | null) => {
+  const updateTokenOut = (token: Token | null) => {
     setSwapState(prev => ({ ...prev, tokenOut: token }));
-    setValidation(prev => ({ ...prev, tokenOutError: undefined }));
-  }, [])
+  };
 
-  const updateAmountIn = useCallback(async (amount: string) => {
+  const updateAmountIn = (amount: string) => {
     setSwapState(prev => ({ ...prev, amountIn: amount }));
-    setValidation(prev => ({ ...prev, amountInError: undefined }));
-    // Calculate output amount
-    if (swapState.tokenIn && swapState.tokenOut && swapState.poolKey && amount) {
-      const amountOut = await calculateAmountOut(
-        amount,
-        swapState.tokenIn,
-        swapState.tokenOut,
-        swapState.poolKey
-      );
-      setSwapState(prev => ({ ...prev, amountOut }));
-    } else {
-      setSwapState(prev => ({ ...prev, amountOut: '' }));
-    }
-  }, [swapState.tokenIn, swapState.tokenOut, swapState.poolKey, calculateAmountOut])
+  };
 
-  const updatePoolKey = useCallback(async (poolKey: PoolKey) => {
-    setSwapState(prev => ({ ...prev, poolKey }));
-    setValidation(prev => ({ ...prev, poolIdError: undefined }));
-    setIsValidatingPool(true);
-    // Create pool info from poolKey - no need to fetch from blockchain
-    const basicPoolInfo: PoolInfo = {
-      token0Symbol: poolKey.currency0 === '0x0000000000000000000000000000000000000000' ? 'ETH' : 'TOKEN0',
-      token1Symbol: 'TOKEN1',
-      fee: poolKey.fee,
-      liquidity: 'Unknown',
-      tick: 0
-    };
-    setPoolInfo(basicPoolInfo);
-    setIsValidatingPool(false);
-    // Recalculate amount out
-    if (swapState.amountIn && swapState.tokenIn && swapState.tokenOut) {
-      const amountOut = await calculateAmountOut(
-        swapState.amountIn,
-        swapState.tokenIn,
-        swapState.tokenOut,
-        poolKey
-      );
-      setSwapState(prev => ({ ...prev, amountOut }));
-    }
-  }, [swapState.amountIn, swapState.tokenIn, swapState.tokenOut, calculateAmountOut])
-
-  const updatePoolId = useCallback((poolIdOrKey: string) => {
+  const updatePoolId = (poolKeyStr: string) => {
     try {
-      const poolKey = JSON.parse(poolIdOrKey) as PoolKey;
-      updatePoolKey(poolKey);
-    } catch {
-      console.warn('Invalid poolKey JSON:', poolIdOrKey);
+      const poolKey = poolKeyStr ? JSON.parse(poolKeyStr) : null;
+      setSwapState(prev => ({ ...prev, poolKey }));
+    } catch (error) {
+      setSwapState(prev => ({ ...prev, poolKey: null }));
     }
-  }, [updatePoolKey])
+  };
 
-  const updateSlippageTolerance = useCallback((slippage: number) => {
-    setSwapState(prev => ({ ...prev, slippageTolerance: slippage }));
-  }, [])
+  const updateSlippageTolerance = (tolerance: number) => {
+    setSwapState(prev => ({ ...prev, slippageTolerance: tolerance }));
+  };
 
-  const updateDeadline = useCallback((minutes: number) => {
-    setSwapState(prev => ({ ...prev, deadline: minutes }));
-  }, [])
+  const updateDeadline = (deadline: number) => {
+    setSwapState(prev => ({ ...prev, deadline }));
+  };
 
-  const swapTokens = useCallback(() => {
+  const swapTokens = () => {
     setSwapState(prev => ({
       ...prev,
       tokenIn: prev.tokenOut,
@@ -532,23 +448,93 @@ export function useV4Swap() {
       amountIn: '',
       amountOut: ''
     }));
-  }, [])
+  };
+
+  const validateSwap = (): boolean => {
+    const newValidation: SwapValidation = {};
+    
+    if (!swapState.tokenIn) {
+      newValidation.tokenInError = 'Select input token';
+    }
+    
+    if (!swapState.tokenOut) {
+      newValidation.tokenOutError = 'Select output token';
+    }
+    
+    if (!swapState.amountIn || parseFloat(swapState.amountIn) <= 0) {
+      newValidation.amountInError = 'Enter valid amount';
+    }
+    
+    if (!swapState.poolKey) {
+      newValidation.poolIdError = 'Enter pool key';
+    }
+    
+    setValidation(newValidation);
+    
+    return Object.keys(newValidation).length === 0;
+  };
+
+  // Main execute swap function that matches your component
+  const executeSwapFromState = async (): Promise<SwapResult> => {
+    if (!isConnected || !walletClient || !publicClient || !chainId) {
+      return { success: false, error: 'Wallet not connected' };
+    }
+
+    if (!swapState.tokenIn || !swapState.tokenOut || !swapState.amountIn || !swapState.poolKey) {
+      return { success: false, error: 'Missing required swap parameters' };
+    }
+
+    setIsSwapping(true);
+
+    try {
+      const result = await executeSwap({
+        poolKey: swapState.poolKey,
+        tokenIn: swapState.tokenIn,
+        tokenOut: swapState.tokenOut,
+        amountIn: swapState.amountIn,
+        amountOutMinimum: swapState.amountOut || '0',
+        recipient: address,
+        deadline: swapState.deadline,
+        usePermit: true
+      });
+
+      return result;
+    } finally {
+      setIsSwapping(false);
+    }
+  };
 
   return {
+    // State
     swapState,
     validation,
     isSwapping,
     isValidatingPool,
     poolInfo,
+    
+    // Update functions
     updateTokenIn,
     updateTokenOut,
     updateAmountIn,
-    updatePoolKey,
     updatePoolId,
     updateSlippageTolerance,
     updateDeadline,
     swapTokens,
-    executeSwap,
-    validateSwap
-  }
+    
+    // Validation and execution
+    validateSwap,
+    executeSwap: executeSwapFromState,
+    
+    // Permit2 functions
+    approveTokenToPermit2,
+    checkPermit2Allowance,
+    signPermit2Batch,
+    
+    // Core swap function (for direct use)
+    executeSwapDirect: executeSwap,
+    
+    // Utility functions
+    isNativeToken,
+    getChainFromId,
+  };
 }
