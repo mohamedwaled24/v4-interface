@@ -267,8 +267,7 @@ export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
   return (
     <HeaderContainer>
       <Logo>
-        <LogoIcon>🦄</LogoIcon>
-        Uniswap
+        Uniswap v4 Contracts Playground
       </Logo>
       
       <NavLinks>
