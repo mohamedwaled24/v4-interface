@@ -3,6 +3,7 @@ import styled from 'styled-components'
 import { Token } from '../../types'
 import { useBalance } from '../../hooks/useBalance'
 import { TokenModal } from './TokenModal'
+import { useWallet } from '../../hooks/useWallet'
 
 interface Props {
   label: string
@@ -101,6 +102,7 @@ const ErrorMessage = styled.div`
 
 export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }) => {
   const { balance } = useBalance(token?.address)
+  const { chainId } = useWallet()
   const [isModalOpen, setIsModalOpen] = useState(false)
 
   const handleOpenModal = () => {
@@ -149,6 +151,7 @@ export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }
         isOpen={isModalOpen} 
         onClose={handleCloseModal} 
         onSelectToken={handleSelectToken}
+        chainId={chainId || 0}
       />
     </Container>
   )

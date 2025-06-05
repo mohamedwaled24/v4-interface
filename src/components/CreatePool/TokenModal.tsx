@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { Token } from '../../types'
 import { Search, X } from '../shared/icons'
-import { UNICHAIN_SEPOLIA_TOKENS } from '../../constants/tokens'
+import { TOKENS_LIST } from '../../constants/tokens'
+import { useWallet } from '../../hooks/useWallet'
 
 interface TokenModalProps {
   isOpen: boolean
   onClose: () => void
   onSelectToken: (token: Token) => void
+  chainId: number
 }
 
 const ModalOverlay = styled.div`
@@ -206,7 +208,7 @@ const TokenName = styled.span`
   font-size: 14px;
 `
 
-export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelectToken }) => {
+export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelectToken, chainId }) => {
   const [searchQuery, setSearchQuery] = useState('')
   const [filteredTokens, setFilteredTokens] = useState<Token[]>([])
   
@@ -216,8 +218,11 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
   const [commonTokens, setCommonTokens] = useState<Token[]>([])
   
   useEffect(() => {
-    // Use Unichain Sepolia tokens
-    const tokens: Token[] = UNICHAIN_SEPOLIA_TOKENS
+    // Filter tokens by current chainId
+    const tokens: Token[] = TOKENS_LIST.filter(token => 
+      // If chainId is available, filter by it, otherwise show all tokens
+      chainId ? token.chainId === chainId : true
+    )
     
     // Find common tokens
     const common = tokens.filter(token => commonTokenSymbols.includes(token.symbol))
@@ -241,7 +246,7 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
       const allTokens = [...tokens].sort((a, b) => a.symbol.localeCompare(b.symbol))
       setFilteredTokens(allTokens)
     }
-  }, [searchQuery])
+  }, [searchQuery, chainId])
   
   if (!isOpen) return null
   
@@ -311,7 +316,7 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
             ))
           ) : (
             <div style={{ padding: '20px', textAlign: 'center', color: '#8F96AC' }}>
-              No tokens found.
+              No tokens found for this network.
             </div>
           )}
         </TokenList>
