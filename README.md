@@ -95,6 +95,8 @@ yarn start
     UniversalRouter: '0x3a9d48ab9751398bbfa63ad67599bb04e4bdf98b',
    }
    ```
+  > [!NOTE]
+  Refer and use the tokens in the default token: https://ipfs.io/ipns/tokens.uniswap.org
 
 ## Key Features
 
