@@ -1,9 +1,9 @@
 > [!WARNING]
-This is a test interface to provide a playground for testing Uniswap V4 contracts and is not meant for production use.
+This is a test interface to provide a playground for testing Uniswap v4 contracts and is not meant for production use.
 
-# Uniswap V4 Interface
+# Uniswap v4 Interface
 
-A frontend application for interacting with Uniswap V4 pools. This interface allows users to create pools, manage liquidity (add/remove), and perform token swaps using the V4 architecture. It features multi-wallet support and integrates Permit2 for efficient token approvals.
+A frontend application for interacting with Uniswap v4 pools. This interface allows users to create pools, manage liquidity (add/remove), and perform token swaps using the v4 architecture. It features multi-wallet support and integrates Permit2 for efficient token approvals.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ Before you begin, ensure you have the following installed:
 
 Clone the project to your local machine:
 ```bash
-git clone https://github.com/aravind33b/interface
+git clone https://github.com/uniswapfoundation/interface
 cd interface
 ```
 
@@ -100,10 +100,10 @@ yarn start
 
 ## Key Features
 
-*   **Uniswap V4 Pool Interaction:**
-    *   Create new V4 pools.
-    *   Add liquidity to V4 pools.
-*   **V4 Swaps:** Execute single hop token swaps through the Universal Router, utilizing V4 pool architecture.
+*   **Uniswap v4 Pool Interaction:**
+    *   Create new v4 pools.
+    *   Add liquidity to v4 pools.
+*   **v4 Swaps:** Execute single hop token swaps through the Universal Router, utilizing v4 pool architecture.
 *   **PoolKey Management:** Utilizes full `PoolKey` objects for identifying and interacting with pools, rather than just `poolId` strings.
 *   **Permit2 Integration:** Leverages Permit2 for gas-efficient token approvals and batch operations.
 *   **Multi-Wallet Support:** Connect using various wallets like MetaMask, WalletConnect-compatible wallets, and Coinbase Wallet.
