@@ -83,7 +83,7 @@ yarn start
    }
    ```
 
-### Adding list of contracts as per netowork:
+### Adding list of contracts as per network:
  - You can modify the contracts list in src/constants/contracts.ts
 
    For example:
@@ -107,6 +107,8 @@ yarn start
 *   **PoolKey Management:** Utilizes full `PoolKey` objects for identifying and interacting with pools, rather than just `poolId` strings.
 *   **Permit2 Integration:** Leverages Permit2 for gas-efficient token approvals and batch operations.
 *   **Multi-Wallet Support:** Connect using various wallets like MetaMask, WalletConnect-compatible wallets, and Coinbase Wallet.
+*   **Analytics:** the analytics page uses envio's indexer https://github.com/enviodev/uniswap-v4-indexer and indexes uniswap v4 position manager and pool manager on unichain sepolia at https://indexer.dev.hyperindex.xyz/771be56/v1/graphql
+ 
 
 ## Tech Stack
 
@@ -120,9 +122,7 @@ yarn start
 
 ## Contributing
 
-Contributions are welcome! Please follow the standard fork-and-pull-request workflow. Ensure your code adheres to the project's linting and formatting standards.
-
-(Further details on contribution guidelines can be added here.)
+Contributions are welcome, it is a great way to get started with Uniswap v4 and make the developer experience better! Please follow the guidelines in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
 
 ## License
 
