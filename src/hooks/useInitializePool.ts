@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { parseUnits, formatUnits, maxUint256, encodeFunctionData } from 'viem'
-import { mainnet, sepolia } from 'viem/chains'
+import { mainnet, sepolia , bsc} from 'viem/chains'
 import { useWallet } from './useWallet'
 import { CONTRACTS } from '../constants/contracts'
 import { generatePoolId } from '../utils/stateViewUtils'
@@ -200,8 +200,10 @@ export function useInitializePool() {
   // Utility functions (same as your working code)
   const getChainFromId = (chainId: number) => {
     switch (chainId) {
-      case 1:
-        return mainnet;
+        case 1:
+          return mainnet;
+        case 56:
+          return bsc;
       case 11155111:
         return sepolia;
       case 1301:
@@ -401,7 +403,7 @@ export function useInitializePool() {
     console.log('Final sanitized permit batch:', sanitizedPermitBatch);
 
     const signature = await walletClient.signTypedData({
-      account: currentUserAddress as `0x${string}`,
+      account: userAddress as `0x${string}`,
       domain,
       types: PERMIT2_BATCH_TYPES,
       primaryType: 'PermitBatch',
@@ -578,8 +580,8 @@ export function useInitializePool() {
       // Step 4: Execute transaction (same as your working code but with createPool)
       console.log('Generating call parameters...');
       console.log('Position details:', {
-        token0: position.pool.token0.address,
-        token1: position.pool.token1.address,
+        token0: 'address' in position.pool.token0 ? position.pool.token0.address : 'NATIVE',
+        token1: 'address' in position.pool.token1 ? position.pool.token1.address : 'NATIVE',
         tickLower: position.tickLower,
         tickUpper: position.tickUpper,
         liquidity: position.liquidity.toString()

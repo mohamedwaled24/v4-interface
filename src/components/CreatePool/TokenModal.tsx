@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { Token } from '../../types'
 import { Search, X } from '../shared/icons'
-import { TOKENS_LIST } from '../../constants/tokens'
+import getTokens from '../../utils/getTokens'
 import { useWallet } from '../../hooks/useWallet'
 
 interface TokenModalProps {
@@ -211,15 +211,30 @@ const TokenName = styled.span`
 export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelectToken, chainId }) => {
   const [searchQuery, setSearchQuery] = useState('')
   const [filteredTokens, setFilteredTokens] = useState<Token[]>([])
+  const [allTokens, setAllTokens] = useState<Token[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   
   // Common tokens to show at the top
   const commonTokenSymbols = ['ETH', 'USDC']
   
   const [commonTokens, setCommonTokens] = useState<Token[]>([])
   
+  // Fetch tokens when modal opens
+  useEffect(() => {
+    if (isOpen && allTokens.length === 0) {
+      setIsLoading(true)
+      getTokens(chainId).then(tokens => {
+        if (tokens) {
+          setAllTokens(tokens)
+        }
+        setIsLoading(false)
+      })
+    }
+  }, [isOpen, allTokens.length, chainId])
+  
   useEffect(() => {
     // Filter tokens by current chainId
-    const tokens: Token[] = TOKENS_LIST.filter(token => 
+    const tokens: Token[] = allTokens.filter(token => 
       // If chainId is available, filter by it, otherwise show all tokens
       chainId ? token.chainId === chainId : true
     )
@@ -243,10 +258,10 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
       setFilteredTokens(filtered)
     } else {
       // For the main list, show all tokens sorted alphabetically
-      const allTokens = [...tokens].sort((a, b) => a.symbol.localeCompare(b.symbol))
-      setFilteredTokens(allTokens)
+      const sortedTokens = [...tokens].sort((a, b) => a.symbol.localeCompare(b.symbol))
+      setFilteredTokens(sortedTokens)
     }
-  }, [searchQuery, chainId])
+  }, [searchQuery, chainId, allTokens])
   
   if (!isOpen) return null
   
@@ -294,7 +309,11 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
         {/* List of Tokens in the selected network */}
         <SectionHeader>All Tokens</SectionHeader>
         <TokenList>
-          {filteredTokens.length > 0 ? (
+          {isLoading ? (
+            <div style={{ padding: '20px', textAlign: 'center', color: '#8F96AC' }}>
+              Loading tokens...
+            </div>
+          ) : filteredTokens.length > 0 ? (
             filteredTokens.map(token => (
               <TokenItem 
                 key={token.address} 

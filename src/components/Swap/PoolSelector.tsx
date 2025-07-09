@@ -1,6 +1,14 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
-import { Pool } from '../../hooks/useV4Swap'
+// Define Pool type locally
+// This matches the expected structure used in this component
+export type Pool = {
+  address: string
+  token0: { address: string; symbol: string; name: string; decimals: number }
+  token1: { address: string; symbol: string; name: string; decimals: number }
+  fee: number
+  hookAddress: string
+}
 import { ArrowDown } from '../shared/icons'
 
 const PoolSelectorContainer = styled.div`

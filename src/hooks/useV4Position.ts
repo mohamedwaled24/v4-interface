@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { parseUnits, formatUnits, maxUint256, encodeFunctionData, getAddress } from 'viem'
-import { mainnet, sepolia } from 'viem/chains'
+import { mainnet, sepolia , bsc } from 'viem/chains'
 import { useWallet } from './useWallet'
 import { CONTRACTS } from '../constants/contracts'
 import { generatePoolId } from '../utils/stateViewUtils'
@@ -137,6 +137,8 @@ export function useV4Position() {
     switch (chainId) {
       case 1:
         return mainnet;
+      case 56:
+        return bsc;
       case 11155111:
         return sepolia;
       case 1301:
@@ -373,10 +375,10 @@ export function useV4Position() {
       console.log('Pool Info for stateview:', {
         poolId,
         chainId,
-        rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL,
+        rpcUrl: import.meta.env.VITE_BSC_MAINNET_RPC_URL,
       });
 
-      const poolInfo = await getPoolInfo(chainId, import.meta.env.VITE_SEPOLIA_RPC_URL, poolId);
+      const poolInfo = await getPoolInfo(chainId, import.meta.env.VITE_BSC_MAINNET_RPC_URL, poolId);
       if (!poolInfo) {
         return { success: false, error: 'Failed to fetch pool data' };
       }

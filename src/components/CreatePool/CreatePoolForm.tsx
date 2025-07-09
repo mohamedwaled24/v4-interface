@@ -806,13 +806,13 @@ export function CreatePoolForm() {
                 <TokenSelectors>
                   <TokenSelector
                     label="Token 1"
-                    token={poolState.token0 || null}
+                    token={poolState.token0 ? { ...poolState.token0, name: (poolState.token0 as any).name ?? '' } : null}
                     onChange={updateToken0}
                     error={validation.token0Error}
                   />
                   <TokenSelector
                     label="Token 2"
-                    token={poolState.token1 || null}
+                    token={poolState.token1 ? { ...poolState.token1, name: (poolState.token1 as any).name ?? '' } : null}
                     onChange={updateToken1}
                     error={validation.token1Error}
                   />
@@ -841,7 +841,15 @@ export function CreatePoolForm() {
                     </SectionDescription>
                   </SectionHeader>
                   <FeeSelector
-                    feeAmount={poolState.fee}
+                    feeAmount={
+                      poolState.fee
+                        ? {
+                            ...poolState.fee,
+                            label: (poolState.fee as any).label ?? `${(poolState.fee.fee / 10000).toFixed(4)}%`,
+                            description: (poolState.fee as any).description ?? 'Custom fee tier',
+                          }
+                        : undefined
+                    }
                     onChange={(fee) => {
                       updateFee(fee)
                     }}
@@ -876,8 +884,8 @@ export function CreatePoolForm() {
                 
 
                 <DepositAmountInputs 
-                  token0={poolState.token0 || null}
-                  token1={poolState.token1 || null}
+                  token0={poolState.token0 ? { ...poolState.token0, name: (poolState.token0 as any).name ?? '' } : null}
+                  token1={poolState.token1 ? { ...poolState.token1, name: (poolState.token1 as any).name ?? '' } : null}
                   token0Amount={token0Amount}
                   token1Amount={token1Amount}
                   onToken0AmountChange={handleToken0AmountChange}

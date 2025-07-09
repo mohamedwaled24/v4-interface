@@ -7,12 +7,42 @@ import { Header, NavType } from './components/shared/Header'
 import { GlobalStyle } from './theme/GlobalStyle'
 import { theme } from './theme/theme'
 import Analytics from './components/Analytics/Analytics'
+import { BSCPoolsDemo } from './components/BSCPools'
 import { client } from './apollo/client'
 import { WalletProvider } from './contexts/WalletContext'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 
-const AppWrapper = styled.div`
+import '@rainbow-me/rainbowkit/styles.css';
+import {
+  getDefaultConfig,
+  RainbowKitProvider,
+} from '@rainbow-me/rainbowkit';
+import { WagmiProvider } from 'wagmi';
+import {
+  mainnet,
+  polygon,
+  optimism,
+  arbitrum,
+  base,
+  bsc
+} from 'wagmi/chains';
+import {
+  QueryClientProvider,
+  QueryClient,
+} from "@tanstack/react-query";
+
+const config = getDefaultConfig({
+  appName: 'My RainbowKit App',
+  projectId: 'ab74342164d54cc004931ee7f4be9777',
+  chains: [mainnet, polygon, optimism, arbitrum, base , bsc],
+  ssr: false, // If your dApp uses server side rendering (SSR)
+});
+
+const queryClient = new QueryClient();
+
+
+const AppWrapper = styled.div` 
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -57,6 +87,9 @@ export function App() {
   
   return (
     <WalletProvider>
+        <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider>
       <ApolloProvider client={client}>
         <ThemeProvider theme={theme}>
           <GlobalStyle />
@@ -67,10 +100,14 @@ export function App() {
               {activeNav === NavType.TRADE && <SwapForm />}
               {activeNav === NavType.POOL && <CreatePoolForm />}
               {activeNav === NavType.EXPLORE && <Analytics />}
+              {activeNav === NavType.BSC_POOLS && <BSCPoolsDemo />}
             </ContentWrapper>
           </AppWrapper>
         </ThemeProvider>
       </ApolloProvider>
+      </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
     </WalletProvider>
   )
 }

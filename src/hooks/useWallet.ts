@@ -8,6 +8,7 @@ interface WalletState {
   chainId: number | null
   network: NetworkConfig | null
   isMetaMaskInstalled: boolean
+  balance: string | null
 }
 
 // Create a global state for wallet that can be accessed across components
@@ -19,6 +20,7 @@ let globalWalletState = {
   isMetaMaskInstalled: false,
   publicClient: null as any,
   walletClient: null as any,
+  balance: null as string | null,
 }
 
 // Create a list of update listeners
@@ -37,11 +39,13 @@ export function useWallet() {
     isConnected: globalWalletState.isConnected,
     chainId: globalWalletState.chainId,
     network: globalWalletState.network,
-    isMetaMaskInstalled: globalWalletState.isMetaMaskInstalled
+    isMetaMaskInstalled: globalWalletState.isMetaMaskInstalled,
+    balance: globalWalletState.balance,
   })
 
   const [publicClient, setPublicClient] = useState<any>(globalWalletState.publicClient)
   const [walletClient, setWalletClient] = useState<any>(globalWalletState.walletClient)
+  const [balance, setBalance] = useState<string | null>(globalWalletState.balance)
 
   // Check if MetaMask is installed
   const checkIfMetaMaskIsInstalled = useCallback(() => {
@@ -58,10 +62,12 @@ export function useWallet() {
         isConnected: globalWalletState.isConnected,
         chainId: globalWalletState.chainId,
         network: globalWalletState.network,
-        isMetaMaskInstalled: globalWalletState.isMetaMaskInstalled
+        isMetaMaskInstalled: globalWalletState.isMetaMaskInstalled,
+        balance: globalWalletState.balance,
       });
       setPublicClient(globalWalletState.publicClient);
       setWalletClient(globalWalletState.walletClient);
+      setBalance(globalWalletState.balance);
     };
     
     // Add listener
@@ -142,6 +148,26 @@ export function useWallet() {
       };
     }
   }, [checkIfMetaMaskIsInstalled]);
+
+  // Fetch balance when address, publicClient, or network changes
+  useEffect(() => {
+    const fetchBalance = async () => {
+      if (state.address && publicClient) {
+        try {
+          const balanceBigInt = await publicClient.getBalance({ address: state.address });
+          // Convert balance from wei to ether (assuming 18 decimals)
+          const balanceEth = (Number(balanceBigInt) / 1e18).toString();
+          updateGlobalWalletState({ balance: balanceEth });
+        } catch (error) {
+          console.error('Failed to fetch balance:', error);
+          updateGlobalWalletState({ balance: null });
+        }
+      } else {
+        updateGlobalWalletState({ balance: null });
+      }
+    };
+    fetchBalance();
+  }, [state.address, publicClient, state.network]);
 
   const handleConnect = (connectInfo: { chainId: string }) => {
     console.log('MetaMask connected:', connectInfo);
@@ -329,5 +355,6 @@ export function useWallet() {
     switchNetwork,
     disconnectWallet,
     isMetaMaskInstalled: checkIfMetaMaskIsInstalled(),
+    balance,
   };
 }

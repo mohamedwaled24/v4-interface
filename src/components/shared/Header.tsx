@@ -3,12 +3,15 @@ import styled from 'styled-components'
 import { useWallet } from '../../hooks/useWallet'
 import { SUPPORTED_NETWORKS } from '../../constants/networks'
 import { NetworkDropdown } from './NetworkDropdown'
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+
 
 // Define interface for navigation types
 export enum NavType {
   TRADE = 'trade',
   EXPLORE = 'explore',
-  POOL = 'pool'
+  POOL = 'pool',
+  BSC_POOLS = 'bsc_pools'
 }
 
 interface HeaderProps {
@@ -63,21 +66,21 @@ const RightSection = styled.div`
   gap: 16px;
 `
 
-const ConnectButton = styled.button`
-  background: ${({ theme }) => theme.colors.accentAction};
-  color: ${({ theme }) => theme.colors.neutral1};
-  border: none;
-  border-radius: ${({ theme }) => theme.borderRadius.round};
-  padding: 8px 16px;
-  font-size: ${({ theme }) => theme.fontSizes.medium};
-  font-weight: ${({ theme }) => theme.fontWeights.semibold};
-  cursor: pointer;
-  transition: opacity 0.2s;
+// const ConnectButton = styled.button`
+//   background: ${({ theme }) => theme.colors.accentAction};
+//   color: ${({ theme }) => theme.colors.neutral1};
+//   border: none;
+//   border-radius: ${({ theme }) => theme.borderRadius.round};
+//   padding: 8px 16px;
+//   font-size: ${({ theme }) => theme.fontSizes.medium};
+//   font-weight: ${({ theme }) => theme.fontWeights.semibold};
+//   cursor: pointer;
+//   transition: opacity 0.2s;
   
-  &:hover {
-    opacity: ${({ theme }) => theme.opacities.hover};
-  }
-`
+//   &:hover {
+//     opacity: ${({ theme }) => theme.opacities.hover};
+//   }
+// `
 
 const AccountButton = styled.button`
   display: flex;
@@ -239,16 +242,64 @@ const NetworkDropdownComponent = () => {
   )
 }
 
+// Add styled dropdown for wallet
+const WalletDropdown = styled.div`
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  background: ${({ theme }) => theme.colors.backgroundSurface};
+  color: ${({ theme }) => theme.colors.neutral1};
+  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  min-width: 220px;
+  z-index: 1000;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`
+
+const WalletDropdownTitle = styled.div`
+  font-weight: 600;
+  margin-bottom: 4px;
+`
+
+const WalletDropdownRow = styled.div`
+  font-size: 14px;
+  margin-bottom: 4px;
+  word-break: break-all;
+`
+
+const WalletDropdownBalance = styled.div`
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 8px;
+`
+
+const WalletDisconnectButton = styled.button`
+  width: 100%;
+  padding: 8px 0;
+  border: none;
+  border-radius: 8px;
+  background: #f44336;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+`
+
 export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
-  const { isConnected, address, connectWallet } = useWallet()
+  const { isConnected, address, connectWallet, disconnectWallet, balance, network } = useWallet()
   const [isConnecting, setIsConnecting] = useState(false)
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   
   const handleConnectWallet = async () => {
     if (typeof window.ethereum === 'undefined') {
       alert('Please install MetaMask or another Ethereum wallet to connect')
       return
     }
-    
     setIsConnecting(true)
     try {
       await connectWallet()
@@ -263,6 +314,21 @@ export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
   const formatAddress = (address: string) => {
     return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`
   }
+  
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false)
+      }
+    }
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isDropdownOpen])
   
   return (
     <HeaderContainer>
@@ -289,21 +355,47 @@ export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
         >
           Pool
         </NavLink>
+        <NavLink 
+          $active={activeNav === NavType.BSC_POOLS} 
+          onClick={() => onNavChange(NavType.BSC_POOLS)}
+        >
+          BSC Pools
+        </NavLink>
       </NavLinks>
       
       <RightSection>
-      <NetworkDropdown />
+        {/* <NetworkDropdown /> */}
+        <ConnectButton />
         
-      {isConnected && address ? (
-          <AccountButton>
-            <AccountIcon>{address.charAt(2).toUpperCase()}</AccountIcon>
-            {formatAddress(address)}
-          </AccountButton>
+        {/* {isConnected && address ? (
+          <div style={{ position: 'relative' }} ref={dropdownRef}>
+            <AccountButton onClick={() => setIsDropdownOpen((open) => !open)}>
+              <AccountIcon>{address.charAt(2).toUpperCase()}</AccountIcon>
+              {formatAddress(address)}
+            </AccountButton>
+            {isDropdownOpen && (
+              <WalletDropdown>
+                <WalletDropdownTitle>Wallet</WalletDropdownTitle>
+                <WalletDropdownRow>Address: <span style={{ fontFamily: 'monospace' }}>{formatAddress(address)}</span></WalletDropdownRow>
+                <WalletDropdownBalance>
+                  Balance: {balance !== null && balance !== undefined ? `${balance} ${network?.nativeCurrency?.symbol || ''}` : 'Loading...'}
+                </WalletDropdownBalance>
+                <WalletDisconnectButton
+                  onClick={() => {
+                    disconnectWallet()
+                    setIsDropdownOpen(false)
+                  }}
+                >
+                  Disconnect
+                </WalletDisconnectButton>
+              </WalletDropdown>
+            )}
+          </div>
         ) : (
           <ConnectButton onClick={handleConnectWallet} disabled={isConnecting}>
             {isConnecting ? 'Connecting...' : 'Connect Wallet'}
           </ConnectButton>
-        )}
+        )} */}
       </RightSection>
     </HeaderContainer>
   )

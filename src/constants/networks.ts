@@ -77,6 +77,30 @@ export const SUPPORTED_NETWORKS: NetworkConfig[] = [
       }
     },
     testnet: true,
-    rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL,
+    rpcUrl: 'https://unichain-sepolia-rpc.publicnode.com',
+  },
+  {
+    id: 56,
+    name: 'BNB Smart Chain',
+    nativeCurrency: {
+      name: 'BNB',
+      symbol: 'BNB',
+      decimals: 18,
+    },
+    rpcUrls: {
+      default: {
+        http: ['https://bsc-dataseed.binance.org/']
+      },
+      public: {
+        http: ['https://bsc-dataseed.binance.org/']
+      }
+    },
+    blockExplorers: {
+      default: {
+        name: 'BscScan',
+        url: 'https://bscscan.com'
+      }
+    },
+    rpcUrl: import.meta.env.VITE_BSC_MAINNET_RPC_URL,
   },
 ]

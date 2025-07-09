@@ -286,27 +286,29 @@ export function useV4Swap() {
         return { success: false, error: 'Universal Router not available on this chain' };
       }
 
-      // Step 1: Handle approvals/permits for non-native tokens
+      // Step 1: Explicitly set Permit2 approval for Universal Router (30 days expiration) for all non-native token swaps
       if (!isNativeToken(tokenIn.address)) {
-        if (usePermit) {
-          // Check if permit is needed
-          const permit2Allowance = await checkPermit2Allowance(tokenIn.address, universalRouterAddress);
-          const now = Math.floor(Date.now() / 1000);
-          
-          if (permit2Allowance.amount < amountInWei || permit2Allowance.expiration < now) {
-            // First approve token to Permit2
-            const approval = await approveTokenToPermit2(tokenIn.address, amountInWei);
-            if (!approval.success) {
-              return { success: false, error: approval.error };
-            }
-          }
-        } else {
-          // Traditional approval
-          const approval = await approveTokenToPermit2(tokenIn.address, amountInWei);
-          if (!approval.success) {
-            return { success: false, error: approval.error };
-          }
+        const permit2Expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30; // 30 days from now
+        // Approve Permit2 for Universal Router with maxUint256 and 30 days expiration
+        const approval = await approveTokenToPermit2(tokenIn.address, amountInWei);
+        if (!approval.success) {
+          return { success: false, error: approval.error };
         }
+        // Explicitly approve Universal Router in Permit2 with 30-day expiration
+        const permit2ApprovalTx = await walletClient.writeContract({
+          address: PERMIT2_ADDRESS as `0x${string}`,
+          abi: permit2Abi.abi,
+          functionName: 'approve',
+          args: [
+            tokenIn.address as `0x${string}`,
+            universalRouterAddress as `0x${string}`,
+            amountInWei,
+            BigInt(permit2Expiration)
+          ],
+          account: address as `0x${string}`,
+          chain: getChainFromId(chainId),
+        });
+        await publicClient.waitForTransactionReceipt({ hash: permit2ApprovalTx });
       }
 
       // Step 2: Skip SDK Currency objects - we don't actually need them for V4Planner
@@ -344,8 +346,12 @@ export function useV4Swap() {
       ]);
       
       // Step 5: Access actions and params directly like in tests
-      const encodedActions = v4Planner.actions;
-      const encodedParams = v4Planner.params;
+      const encodedActions = (typeof v4Planner.actions === 'string' && v4Planner.actions.startsWith('0x'))
+        ? v4Planner.actions as `0x${string}`
+        : `0x${Buffer.from(v4Planner.actions).toString('hex')}` as `0x${string}`;
+      const encodedParams = Array.isArray(v4Planner.params)
+        ? v4Planner.params.map(p => (typeof p === 'string' && p.startsWith('0x')) ? p as `0x${string}` : `0x${Buffer.from(p).toString('hex')}` as `0x${string}`)
+        : [];
       
       // Step 6: Create Universal Router command exactly like tests
       const commands = encodePacked(['uint8'], [CommandType.V4_SWAP]);
@@ -493,7 +499,7 @@ export function useV4Swap() {
         tokenOut: swapState.tokenOut,
         amountIn: swapState.amountIn,
         amountOutMinimum: swapState.amountOut || '0',
-        recipient: address,
+        recipient: address ?? undefined,
         deadline: swapState.deadline,
         usePermit: true
       });

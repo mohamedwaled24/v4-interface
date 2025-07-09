@@ -17,4 +17,10 @@ export const CONTRACTS = {
     StateView: '0xe1dd9c3fa50edb962e442f60dfbc432e24537e4c',
     UniversalRouter: '0x3a9d48ab9751398bbfa63ad67599bb04e4bdf98b',
   },
+  56: {
+    PoolManager: '0x28e2ea090877bf75740558f6bfb36a5ffee9e9df',
+    PositionManager: '0x7a4a5c919ae2541aed11041a1aeee68f1287f95b',
+    StateView: '0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4',
+    UniversalRouter: '0x1906c1d672b88cd1b9ac7593301ca990f94eae07',
+  },
 };

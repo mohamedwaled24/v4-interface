@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { useQuery } from '@apollo/client';
+import React, { useState, useEffect } from 'react';
 import { gql } from '@apollo/client';
-import { Box, Typography, Grid, Paper, Accordion, AccordionSummary, AccordionDetails, Checkbox, FormControlLabel, CircularProgress, IconButton, Tooltip } from '@mui/material';
+import { Box, Typography, Grid, Paper, Accordion, AccordionSummary, AccordionDetails, Checkbox, FormControlLabel, CircularProgress, IconButton, Tooltip, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import { useWalletContext } from '../../contexts/WalletContext';
+import { GRAPHQL_ENDPOINTS, getNetworkName, isNetworkSupported } from '../../config/graphql';
+import { useNetworkQuery } from '../../hooks/useNetworkQuery';
 
 // GraphQL Queries
 const POOLS_QUERY = gql`
@@ -67,19 +69,35 @@ interface HookStats {
 const Analytics: React.FC = () => {
   const [showVanillaPools, setShowVanillaPools] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
+  const [selectedNetwork, setSelectedNetwork] = useState<number>(1301); // Default to Unichain Sepolia
   
+  const { network: walletNetwork } = useWalletContext();
+  
+  // Auto-sync with wallet network if it's supported
+  useEffect(() => {
+    if (walletNetwork && isNetworkSupported(walletNetwork.id)) {
+      setSelectedNetwork(walletNetwork.id);
+    }
+  }, [walletNetwork]);
+
   const handleCopy = (text: string) => {
-    // Remove the network ID prefix (1301_) if it exists
-    const addressToCopy = text.startsWith('1301_') ? text.substring(5) : text;
+    // Remove the network ID prefix (1301_, 1_, etc.) if it exists
+    const addressToCopy = text.includes('_') ? text.substring(text.indexOf('_') + 1) : text;
     navigator.clipboard.writeText(addressToCopy);
     setCopySuccess(text);
     setTimeout(() => setCopySuccess(null), 2000);
   };
 
-  // Fetch data
-  const { loading: poolsLoading, error: poolsError, data: poolsData } = useQuery(POOLS_QUERY);
-  const { loading: managerLoading, error: managerError, data: managerData } = useQuery(POOL_MANAGER_STATS);
-  const { loading: hookStatsLoading, error: hookStatsError, data: hookStatsData } = useQuery(HOOK_STATS_QUERY);
+  // Fetch data using network-specific queries
+  const { loading: poolsLoading, error: poolsError, data: poolsData } = useNetworkQuery(POOLS_QUERY, {
+    networkId: selectedNetwork,
+  });
+  const { loading: managerLoading, error: managerError, data: managerData } = useNetworkQuery(POOL_MANAGER_STATS, {
+    networkId: selectedNetwork,
+  });
+  const { loading: hookStatsLoading, error: hookStatsError, data: hookStatsData } = useNetworkQuery(HOOK_STATS_QUERY, {
+    networkId: selectedNetwork,
+  });
 
   // Filter pools based on vanilla filter and sort by creation date
   const filteredPools = poolsData?.Pool?.filter((pool: Pool) => 
@@ -118,6 +136,24 @@ const Analytics: React.FC = () => {
   return (
     <Box sx={{ flexGrow: 1, p: 3 }}>
       <Typography variant="h4" gutterBottom>Analytics Dashboard</Typography>
+      
+      {/* Network Selection */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <FormControl fullWidth>
+          <InputLabel>Select Network</InputLabel>
+          <Select
+            value={selectedNetwork}
+            label="Select Network"
+            onChange={(e) => setSelectedNetwork(e.target.value as number)}
+          >
+            {Object.keys(GRAPHQL_ENDPOINTS).map((networkId) => (
+              <MenuItem key={networkId} value={Number(networkId)}>
+                {getNetworkName(Number(networkId))}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Paper>
       
       {/* Vanilla Pools Filter */}
       <Paper 
