@@ -219,18 +219,31 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
   
   const [commonTokens, setCommonTokens] = useState<Token[]>([])
   
-  // Fetch tokens when modal opens
+  const SUPPORTED_1INCH_CHAINS = [1, 56, 137, 10, 42161, 100, 43114, 250, 8217, 1313161554, 324, 8453];
+
+  // Fetch tokens when modal opens or chainId changes
   useEffect(() => {
-    if (isOpen && allTokens.length === 0) {
+    if (isOpen && SUPPORTED_1INCH_CHAINS.includes(chainId)) {
       setIsLoading(true)
       getTokens(chainId).then(tokens => {
         if (tokens) {
           setAllTokens(tokens)
+        } else {
+          setAllTokens([])
         }
         setIsLoading(false)
       })
+    } else if (isOpen) {
+      setAllTokens([]);
+      setIsLoading(false);
     }
-  }, [isOpen, allTokens.length, chainId])
+  }, [isOpen, chainId])
+  
+  useEffect(() => {
+    // Reset search and filtered tokens on network change
+    setSearchQuery('');
+    setFilteredTokens([]);
+  }, [chainId]);
   
   useEffect(() => {
     // Filter tokens by current chainId
@@ -264,6 +277,8 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
   }, [searchQuery, chainId, allTokens])
   
   if (!isOpen) return null
+
+  const isChainSupported = SUPPORTED_1INCH_CHAINS.includes(chainId);
   
   return (
     <ModalOverlay onClick={onClose}>
@@ -309,7 +324,11 @@ export const TokenModal: React.FC<TokenModalProps> = ({ isOpen, onClose, onSelec
         {/* List of Tokens in the selected network */}
         <SectionHeader>All Tokens</SectionHeader>
         <TokenList>
-          {isLoading ? (
+          {!isChainSupported ? (
+            <div style={{ padding: '20px', textAlign: 'center', color: '#8F96AC' }}>
+              Token list not available for this network.
+            </div>
+          ) : isLoading ? (
             <div style={{ padding: '20px', textAlign: 'center', color: '#8F96AC' }}>
               Loading tokens...
             </div>

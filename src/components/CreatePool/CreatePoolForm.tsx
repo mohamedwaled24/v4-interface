@@ -19,6 +19,7 @@ import { calculateTickSpacingFromFeeAmount } from '../Liquidity/utils'
 import { NetworkSelector } from '../shared/NetworkSelector'
 import { generatePoolId, getPoolInfo, needsPoolCreation, isPoolReady } from '../../utils/stateViewUtils';
 import { addDeployedPool } from '../Swap/DeployedPoolsList'
+import { SUPPORTED_NETWORKS } from '../../constants/networks';
 
 const Container = styled.div`
   display: flex;
@@ -380,8 +381,9 @@ export function CreatePoolForm() {
         return { exists: false, isInitialized: false, poolId: null };
       }
 
-      const rpcUrl = network?.rpcUrl || 'https://unichain-sepolia-rpc.publicnode.com';
-      const poolInfo = await getPoolInfo(chainId, rpcUrl, poolId);
+      // Use wallet provider for dynamic RPC
+      const provider = walletClient?.transport?.provider || (typeof window !== 'undefined' ? window.ethereum : undefined);
+      const poolInfo = await getPoolInfo(chainId, provider, poolId);
       
       console.log('Pool existence check result:', {
         exists: poolInfo.exists,

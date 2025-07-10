@@ -3,13 +3,14 @@ import styled from 'styled-components'
 import { TokenSelector } from '../CreatePool/TokenSelector'
 import { SwapSettings } from './SwapSettings'
 import { useV4Swap } from '../../hooks/useV4Swap'
-import { useAccount } from 'wagmi'
+import { useAccount, useWalletClient } from 'wagmi'
 import { findBestPoolByLiquidity, findBestPool, convertPoolToPoolKey, convertBSCPoolToPoolKey } from '../../utils/poolSelectionUtils'
 import { ArrowDown } from '../shared/icons'
 import { TestPoolDeployer } from './TestPoolDeployer'
 import { DeployedPoolsList, addDeployedPool } from './DeployedPoolsList'
 import { GRAPHQL_ENDPOINTS } from '../../config/graphql';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { SUPPORTED_NETWORKS } from '../../constants/networks';
 
 const Container = styled.div`
   display: flex;
@@ -315,7 +316,8 @@ export function SwapForm() {
   const [poolKeyInput, setPoolKeyInput] = useState<string>('');
   const [autoSelectedPool, setAutoSelectedPool] = useState<any>(null);
 
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useAccount();
+  const { data: walletClient } = useWalletClient();
   const {
     swapState,
     validation,
@@ -386,9 +388,16 @@ export function SwapForm() {
 
         // Fetch liquidity for each pool
         const chainId = 1; // fallback to Ethereum mainnet
-        const rpcUrl = import.meta.env.VITE_BSC_MAINNET_RPC_URL;
+        const getRpcUrlForChain = (chainId: number): string | undefined => {
+          const network = SUPPORTED_NETWORKS.find(n => n.id === chainId);
+          return network?.rpcUrl;
+        };
+        const rpcUrl = getRpcUrlForChain(chainId);
         const { generatePoolId, getPoolInfo } = await import('../../utils/stateViewUtils');
         const { convertPoolToPoolKey } = await import('../../utils/poolSelectionUtils');
+
+        // Use wallet provider for dynamic RPC
+        const provider = walletClient?.transport?.provider || (typeof window !== 'undefined' ? window.ethereum : undefined);
 
         const poolsWithLiquidity = await Promise.all(
           matchingPools.map(async (pool) => {
@@ -396,7 +405,8 @@ export function SwapForm() {
             const poolId = generatePoolId(poolKey);
             let liquidity = 0n;
             try {
-              const info = await getPoolInfo(chainId, rpcUrl, poolId);
+              if (!provider) throw new Error('No wallet provider available');
+              const info = await getPoolInfo(chainId, provider, poolId);
               liquidity = BigInt(info.liquidity || '0');
             } catch {}
             return { pool, fee: typeof pool.feeTier === 'string' ? parseInt(pool.feeTier) : pool.feeTier, liquidity };
@@ -673,6 +683,7 @@ export function SwapForm() {
                 token={swapState.tokenIn}
                 onChange={updateTokenIn}
                 error={validation.tokenInError}
+                provider={walletClient?.transport?.provider || (typeof window !== 'undefined' ? window.ethereum : undefined)}
               />
             </InputRow>
             {swapState.tokenIn && <USDValue>$0.00</USDValue>}
@@ -701,6 +712,7 @@ export function SwapForm() {
                 token={swapState.tokenOut}
                 onChange={updateTokenOut}
                 error={validation.tokenOutError}
+                provider={walletClient?.transport?.provider || (typeof window !== 'undefined' ? window.ethereum : undefined)}
               />
             </InputRow>
             {swapState.tokenOut && <USDValue>$0.00</USDValue>}

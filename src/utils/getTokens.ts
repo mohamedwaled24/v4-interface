@@ -12,6 +12,7 @@ interface OneInchToken {
 const getTokens = async (chainId?: number): Promise<Token[] | undefined> => {
   // Default to Ethereum mainnet if chainId is not provided or is 0
   if (!chainId || chainId === 0) chainId = 1;
+  console.log('Fetching tokens for chainId:', chainId);
  try {
      // Use 1inch Token List API which has native chain support
      const response = await fetch(`https://tokens.1inch.io/v1.1/${chainId}`);

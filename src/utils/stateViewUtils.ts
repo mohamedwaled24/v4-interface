@@ -5,6 +5,7 @@ import {
   encodeAbiParameters, 
   keccak256, 
   Hex, 
+  custom,
 } from 'viem';
 import { CONTRACTS } from '../constants/contracts';
 import stateViewABI from '../../contracts/stateView.json';
@@ -91,16 +92,16 @@ export const generatePositionId = (poolId: `0x${string}`, positionInfo: Position
 /**
  * Create a StateView contract instance
  * @param chainId Chain ID
- * @param rpcUrl RPC URL
+ * @param provider Wallet provider (e.g., window.ethereum)
  * @returns StateView contract instance
  */
-export const getStateViewContract = (chainId: number, rpcUrl: string) => {
+export const getStateViewContract = (chainId: number, provider: any) => {
   if (!CONTRACTS[chainId as keyof typeof CONTRACTS]) {
     throw new Error(`Unsupported chain ID: ${chainId}`);
   }
 
   const publicClient = createPublicClient({
-    transport: http(rpcUrl)
+    transport: custom(provider)
   });
 
   return getContract({
@@ -113,13 +114,13 @@ export const getStateViewContract = (chainId: number, rpcUrl: string) => {
 /**
  * Get pool information and existence status using the StateView contract
  * @param chainId Chain ID
- * @param rpcUrl RPC URL
+ * @param provider Wallet provider (e.g., window.ethereum)
  * @param poolId Pool ID
  * @returns Pool information with existence and initialization status
  */
-export const getPoolInfo = async (chainId: number, rpcUrl: string, poolId: `0x${string}`): Promise<PoolInfoResult> => {
+export const getPoolInfo = async (chainId: number, provider: any, poolId: `0x${string}`): Promise<PoolInfoResult> => {
   try {
-    const stateView = getStateViewContract(chainId, rpcUrl);
+    const stateView = getStateViewContract(chainId, provider);
     
     console.log(`Checking pool info for ID: ${poolId}`);
     

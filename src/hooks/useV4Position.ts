@@ -382,7 +382,12 @@ export function useV4Position() {
         rpcUrl: import.meta.env.VITE_BSC_MAINNET_RPC_URL,
       });
 
-      const poolInfo = await getPoolInfo(chainId, import.meta.env.VITE_BSC_MAINNET_RPC_URL, poolId);
+      // Use wallet provider for dynamic RPC
+      const provider = walletClient?.transport?.provider || (typeof window !== 'undefined' ? window.ethereum : undefined);
+      if (!provider) {
+        return { success: false, error: 'No wallet provider available' };
+      }
+      const poolInfo = await getPoolInfo(chainId, provider, poolId);
       if (!poolInfo) {
         return { success: false, error: 'Failed to fetch pool data' };
       }

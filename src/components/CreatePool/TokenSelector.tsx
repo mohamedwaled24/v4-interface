@@ -1,14 +1,15 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { Token } from '../../types'
 import { useBalance } from '../../hooks/useBalance'
 import { TokenModal } from './TokenModal'
 import { useWalletContext } from '../../contexts/WalletContext'
+import { useWalletClient } from 'wagmi';
 
 interface Props {
   label: string
   token: Token | null
-  onChange: (token: Token) => void
+  onChange: (token: Token | null) => void
   error?: string
 }
 
@@ -107,9 +108,22 @@ const ErrorMessage = styled.div`
 
 
 export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }) => {
-  const { chainId } = useWalletContext()
-  const { balance } = useBalance(token?.address, token?.chainId ?? chainId ?? undefined)
+  const { data: walletClient } = useWalletClient();
+  const chainId = walletClient?.chain?.id;
+  console.log('TokenSelector chainId from walletClient:', chainId);
+  // Always use walletClient's provider for reads
+  const provider = walletClient?.transport?.provider;
+  // Only fetch balance if token address is available
+  const { balance } = useBalance(
+    token?.address,
+    token?.chainId ?? chainId ?? undefined,
+    provider
+  );
   const [isModalOpen, setIsModalOpen] = useState(false)
+
+  useEffect(() => {
+    onChange(null);
+  }, [chainId]);
 
   const handleOpenModal = () => {
     setIsModalOpen(true)
@@ -120,6 +134,7 @@ export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }
   }
 
   const handleSelectToken = (selectedToken: Token) => {
+    console.log('Selected token address:', selectedToken.address);
     onChange(selectedToken)
   }
 

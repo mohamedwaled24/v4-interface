@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAccount, usePublicClient } from 'wagmi'
 import { formatUnits } from 'viem'
 import { useDebounce } from 'use-debounce'
+import { createPublicClient, custom } from 'viem';
 
 const ERC20_ABI = [
   {
@@ -27,13 +28,16 @@ function cleanAddress(address?: string): string | undefined {
   return address;
 }
 
-export function useBalance(tokenAddress?: string, chainId?: number) {
+export function useBalance(tokenAddress?: string, chainId?: number, provider?: any) {
 
   const [debouncedAddress] = useDebounce(tokenAddress, 500);
   const cleanTokenAddress = cleanAddress(debouncedAddress);
   const [balance, setBalance] = useState<string>('')
   const { address } = useAccount()
-  const publicClient = usePublicClient(chainId ? { chainId } : undefined)
+  // Use the provider if given, otherwise use wagmi's public client
+  const publicClient = provider
+    ? createPublicClient({ transport: custom(provider) })
+    : usePublicClient(chainId ? { chainId } : undefined);
 
   useEffect(() => {
     if (!publicClient || !address) {
@@ -43,8 +47,12 @@ export function useBalance(tokenAddress?: string, chainId?: number) {
 
     const fetchBalance = async () => {
       try {
+        let providerInfo = provider ? provider.constructor?.name : 'undefined';
+        let providerChainId = provider && provider.chainId ? provider.chainId : 'n/a';
+        console.log('[useBalance] chainId:', chainId, '| provider:', providerInfo, '| provider.chainId:', providerChainId, '| tokenAddress:', cleanTokenAddress, '| userAddress:', address);
         // Handle native ETH
         if (!cleanTokenAddress || cleanTokenAddress === '0x0000000000000000000000000000000000000000') {
+          console.log('[useBalance] Fetching native balance for', address, 'on chain', chainId);
           const balance = await publicClient.getBalance({
             address: address as `0x${string}`
           })
@@ -53,6 +61,7 @@ export function useBalance(tokenAddress?: string, chainId?: number) {
         }
 
         // Handle ERC20 tokens
+        console.log('[useBalance] Fetching ERC20 balance for', cleanTokenAddress, 'for user', address, 'on chain', chainId);
         const [balanceResult, decimalsResult] = await Promise.all([
           publicClient.readContract({
             address: cleanTokenAddress as `0x${string}`,
@@ -79,10 +88,10 @@ export function useBalance(tokenAddress?: string, chainId?: number) {
     }
 
     fetchBalance()
-    const interval = setInterval(fetchBalance, 150000) // Refresh every 15 seconds
+    const interval = setInterval(fetchBalance, 15000) // Refresh every 15 seconds
 
     return () => clearInterval(interval)
-  }, [publicClient, debouncedAddress, tokenAddress])
+  }, [publicClient, debouncedAddress, tokenAddress, address, chainId, provider])
 
   return { balance }
 }
