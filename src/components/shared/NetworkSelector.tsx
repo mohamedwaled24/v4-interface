@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { SUPPORTED_NETWORKS } from '../../constants/networks'
-import { useWallet } from '../../hooks/useWallet'
+import { useWalletContext } from '../../contexts/WalletContext'
 import { toast } from 'react-toastify'
 
 const Container = styled.div`
@@ -34,7 +34,7 @@ interface NetworkSelectorProps {
 }
 
 export const NetworkSelector: React.FC<NetworkSelectorProps> = ({ className }) => {
-  const { chainId, switchNetwork, isConnected } = useWallet()
+  const { chainId, switchNetwork, isConnected } = useWalletContext()
   const [selectedNetwork, setSelectedNetwork] = useState<number>(chainId || SUPPORTED_NETWORKS[0].id)
   const [isChangingNetwork, setIsChangingNetwork] = useState(false)
 

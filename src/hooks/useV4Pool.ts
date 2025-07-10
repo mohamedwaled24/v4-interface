@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Token } from '../components/CreatePool/TokenSelector'
 import { FeeOption } from '../components/CreatePool/FeeSelector'
 import { isAddress } from 'viem'
-import { useWallet } from './useWallet'
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
 import poolManagerABI from '../../contracts/poolManager.json'
 
 // V4 Factory ABI (only the create pool function)
@@ -42,7 +42,9 @@ interface CreatePoolResult {
 }
 
 export function useV4Pool() {
-  const { publicClient, walletClient, network } = useWallet()
+  const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
+  const { address, isConnected } = useAccount();
   const [isCreating, setIsCreating] = useState(false)
   const [poolState, setPoolState] = useState<V4PoolState>({
     hookAddress: '',
@@ -73,12 +75,12 @@ export function useV4Pool() {
   }
 
   const createPool = async (sqrtPriceX96: bigint): Promise<CreatePoolResult> => {
-    if (!network?.poolManagerAddress || !walletClient || !publicClient) {
+    if (!publicClient || !walletClient || !address) {
       return { success: false, error: 'Network not configured properly' }
     }
 
     // Validate network
-    if (network.id !== 1301) { // Unichain Sepolia
+    if (publicClient.chain.id !== 1301) { // Unichain Sepolia
       return { success: false, error: 'Please switch to Unichain Sepolia network' }
     }
 
@@ -89,9 +91,6 @@ export function useV4Pool() {
     setIsCreating(true)
 
     try {
-      // Get the wallet's address
-      const [address] = await walletClient.getAddresses()
-
       // Sort tokens to match Uniswap's ordering
       const [token0, token1] = poolState.token0!.address.toLowerCase() < poolState.token1!.address.toLowerCase()
         ? [poolState.token0!, poolState.token1!] 
@@ -99,8 +98,8 @@ export function useV4Pool() {
 
       // Initialize pool
       const { request: initRequest } = await publicClient.simulateContract({
-        address: network.poolManagerAddress as `0x${string}`,
-        abi: POOL_MANAGER_ABI,
+        address: publicClient.chain.contracts.poolManager.address as `0x${string}`,
+        abi: poolManagerABI,
         functionName: 'initialize',
         args: [
           {

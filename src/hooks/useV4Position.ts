@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { parseUnits, formatUnits, maxUint256, encodeFunctionData, getAddress } from 'viem'
 import { mainnet, sepolia , bsc } from 'viem/chains'
-import { useWallet } from './useWallet'
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
 import { CONTRACTS } from '../constants/contracts'
 import { generatePoolId } from '../utils/stateViewUtils'
 import permit2Abi from '../../contracts/permit2.json'
@@ -129,7 +129,11 @@ interface ExecuteTransactionResult {
 // };
 
 export function useV4Position() {
-  const { publicClient, walletClient, chainId, address, isConnected, network } = useWallet()
+  const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
+  const { address, isConnected } = useAccount();
+  // For chainId, use walletClient?.chain.id or publicClient?.chain?.id or fallback
+  const chainId = walletClient?.chain.id || publicClient?.chain?.id || 1;
   const [isAddingLiquidity, setIsAddingLiquidity] = useState(false)
   const [currentPoolId, setCurrentPoolId] = useState<string | null>(null)
 

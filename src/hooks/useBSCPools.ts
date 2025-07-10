@@ -34,10 +34,11 @@ export interface BSCPool {
   event_id?: string;
   id?: string;
   tick?: number;
+  chainId?: number; // Add chainId for filtering
 }
 
 interface BSCPoolsData {
-  PoolManager_Initialize: BSCPool[];
+  Pool: BSCPool[];
 }
 
 interface BSCPoolsResult {
@@ -72,10 +73,8 @@ export function useBSCPools(): BSCPoolsResult {
       }
 
       const result = await response.json();
-      
       // Handle the nested PoolManager_Initialize structure
       const poolsData = result.PoolManager_Initialize || [];
-      
       setPools(poolsData);
     } catch (err) {
       console.error('Error fetching BSC pools:', err);
@@ -119,7 +118,6 @@ export async function fetchBSCPools(): Promise<BSCPool[]> {
     }
 
     const result = await response.json();
-    
     // Handle the nested PoolManager_Initialize structure
     return result.PoolManager_Initialize || [];
   } catch (error) {

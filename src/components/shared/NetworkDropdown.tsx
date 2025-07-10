@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import styled from 'styled-components'
-import { useWallet } from '../../hooks/useWallet'
+import { useWalletContext } from '../../contexts/WalletContext'
 import { SUPPORTED_NETWORKS } from '../../constants/networks'
 import { toast } from 'react-toastify'
 
@@ -88,7 +88,7 @@ interface NetworkDropdownProps {
 }
 
 export const NetworkDropdown: React.FC<NetworkDropdownProps> = ({ className }) => {
-  const { chainId, network, switchNetwork, isConnected } = useWallet()
+  const { chainId, network, switchNetwork, isConnected } = useWalletContext()
   const [isOpen, setIsOpen] = useState(false)
   const [isChangingNetwork, setIsChangingNetwork] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useWallet } from './useWallet'
+import { useAccount, usePublicClient } from 'wagmi'
 import { formatUnits } from 'viem'
 import { useDebounce } from 'use-debounce'
 
@@ -20,11 +20,20 @@ const ERC20_ABI = [
   },
 ] as const
 
-export function useBalance(tokenAddress?: string) {
+// Helper to strip chainId prefix from token addresses (e.g., '56_0xabc...' -> '0xabc...')
+function cleanAddress(address?: string): string | undefined {
+  if (!address) return address;
+  if (address.includes('_')) return address.split('_')[1];
+  return address;
+}
+
+export function useBalance(tokenAddress?: string, chainId?: number) {
 
   const [debouncedAddress] = useDebounce(tokenAddress, 500);
+  const cleanTokenAddress = cleanAddress(debouncedAddress);
   const [balance, setBalance] = useState<string>('')
-  const { publicClient, address } = useWallet()
+  const { address } = useAccount()
+  const publicClient = usePublicClient(chainId ? { chainId } : undefined)
 
   useEffect(() => {
     if (!publicClient || !address) {
@@ -35,7 +44,7 @@ export function useBalance(tokenAddress?: string) {
     const fetchBalance = async () => {
       try {
         // Handle native ETH
-        if (!tokenAddress || tokenAddress === '0x0000000000000000000000000000000000000000') {
+        if (!cleanTokenAddress || cleanTokenAddress === '0x0000000000000000000000000000000000000000') {
           const balance = await publicClient.getBalance({
             address: address as `0x${string}`
           })
@@ -46,13 +55,13 @@ export function useBalance(tokenAddress?: string) {
         // Handle ERC20 tokens
         const [balanceResult, decimalsResult] = await Promise.all([
           publicClient.readContract({
-            address: tokenAddress as `0x${string}`,
+            address: cleanTokenAddress as `0x${string}`,
             abi: ERC20_ABI,
             functionName: 'balanceOf',
             args: [address as `0x${string}`],
           }),
           publicClient.readContract({
-            address: tokenAddress as `0x${string}`,
+            address: cleanTokenAddress as `0x${string}`,
             abi: ERC20_ABI,
             functionName: 'decimals',
           }),

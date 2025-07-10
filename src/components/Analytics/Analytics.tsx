@@ -70,6 +70,9 @@ const Analytics: React.FC = () => {
   const [showVanillaPools, setShowVanillaPools] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [selectedNetwork, setSelectedNetwork] = useState<number>(1301); // Default to Unichain Sepolia
+  const [fallbackPools, setFallbackPools] = useState<Pool[]>([]);
+  const [fallbackLoading, setFallbackLoading] = useState(false);
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
   
   const { network: walletNetwork } = useWalletContext();
   
@@ -99,13 +102,41 @@ const Analytics: React.FC = () => {
     networkId: selectedNetwork,
   });
 
+  // Fallback: If poolsError is a 404, fetch from backup REST endpoint
+  useEffect(() => {
+    if (poolsError && poolsError.message && poolsError.message.includes('status code 404')) {
+      setFallbackLoading(true);
+      setFallbackError(null);
+      fetch(GRAPHQL_ENDPOINTS.all)
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          setFallbackPools((data.Pool || []).slice(0, 100));
+          setFallbackLoading(false);
+        })
+        .catch(err => {
+          setFallbackError(err.message || 'Failed to fetch fallback pools');
+          setFallbackLoading(false);
+        });
+    } else {
+      setFallbackPools([]);
+      setFallbackError(null);
+      setFallbackLoading(false);
+    }
+  }, [poolsError]);
+
   // Filter pools based on vanilla filter and sort by creation date
-  const filteredPools = poolsData?.Pool?.filter((pool: Pool) => 
+  const filteredPools = (poolsData?.Pool?.filter((pool: Pool) => 
     !showVanillaPools || pool.hooks === '0x0000000000000000000000000000000000000000'
-  ) || [];
+  ) || []).slice(0, 100);
+  const filteredFallbackPools = fallbackPools.filter((pool: Pool) =>
+    !showVanillaPools || pool.hooks === '0x0000000000000000000000000000000000000000'
+  ).slice(0, 100);
 
   // Loading state
-  if (poolsLoading || managerLoading || hookStatsLoading) {
+  if (poolsLoading || managerLoading || hookStatsLoading || fallbackLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
         <CircularProgress />
@@ -113,8 +144,17 @@ const Analytics: React.FC = () => {
     );
   }
 
-  // Error state
-  if (poolsError || managerError || hookStatsError) {
+  // Error state (only show if fallback also fails or not a 404)
+  if ((poolsError && poolsError.message && poolsError.message.includes('status code 404')) && fallbackError) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography color="error">
+          Error loading data: {poolsError?.message} <br />
+          Fallback error: {fallbackError}
+        </Typography>
+      </Box>
+    );
+  } else if ((poolsError && !poolsError.message.includes('status code 404')) || managerError || hookStatsError) {
     return (
       <Box sx={{ p: 3 }}>
         <Typography color="error">
@@ -274,10 +314,10 @@ const Analytics: React.FC = () => {
         {/* Pools List */}
         <Grid item xs={12}>
           <Typography variant="h6">Pools</Typography>
-          {filteredPools.length === 0 ? (
+          {(filteredPools.length === 0 && filteredFallbackPools.length === 0) ? (
             <Typography>No pools found</Typography>
           ) : (
-            filteredPools.map((pool: Pool) => (
+            (filteredPools.length > 0 ? filteredPools : filteredFallbackPools).map((pool: Pool) => (
               <Accordion key={pool.id}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>

@@ -3,25 +3,28 @@ import styled from 'styled-components'
 import { TokenSelector } from '../CreatePool/TokenSelector'
 import { SwapSettings } from './SwapSettings'
 import { useV4Swap } from '../../hooks/useV4Swap'
-import { useWallet } from '../../hooks/useWallet'
-import { useAllPools } from '../../hooks/useAllPools';
-import { useBSCPools } from '../../hooks/useBSCPools';
+import { useAccount } from 'wagmi'
 import { findBestPoolByLiquidity, findBestPool, convertPoolToPoolKey, convertBSCPoolToPoolKey } from '../../utils/poolSelectionUtils'
 import { ArrowDown } from '../shared/icons'
 import { TestPoolDeployer } from './TestPoolDeployer'
 import { DeployedPoolsList, addDeployedPool } from './DeployedPoolsList'
+import { GRAPHQL_ENDPOINTS } from '../../config/graphql';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 const Container = styled.div`
   display: flex;
-  gap: 24px;
-  padding: 16px 0;
-  width: 100%;
-  max-width: 840px;
-  margin: 0 auto;
-  
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  width: 100vw;
+  padding: 0;
+  box-sizing: border-box;
+  flex-direction: column;
+  position: relative;
   @media (max-width: 768px) {
     flex-direction: column;
-    max-width: 480px;
+    min-height: auto;
+    padding: 16px 0;
   }
 `
 
@@ -30,17 +33,28 @@ const MainContent = styled.div`
   flex-direction: column;
   gap: 24px;
   width: 100%;
-  max-width: 480px;
+  max-width: 540px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  @media (max-width: 768px) {
+    max-width: 98vw;
+  }
 `
 
 const SwapContainer = styled.div`
   background: ${({ theme }) => theme.colors.backgroundModule};
   border-radius: 16px;
-  padding: 16px;
+  padding: 32px 28px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   width: 100%;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.08);
+  @media (max-width: 768px) {
+    padding: 16px;
+  }
+    margin:auto;
 `
 
 const SwapHeader = styled.div`
@@ -64,10 +78,13 @@ const SwapTab = styled.button<{ $active?: boolean }>`
   color: ${({ theme, $active }) => 
     $active ? theme.colors.neutral1 : theme.colors.neutral3};
   cursor: pointer;
+  border-radius: 12px;
+  background: ${({ $active, theme }) => $active ? theme.colors.backgroundInteractive || '#f3f3f3' : 'none'};
+  transition: background 0.2s;
 `
 
 const InputContainer = styled.div`
-  background: ${({ theme }) => theme.colors.backgroundInteractive};
+  background: grey;
   border-radius: 12px;
   padding: 16px;
   display: flex;
@@ -290,7 +307,15 @@ interface PoolKey {
 }
 
 export function SwapForm() {
-  const { isConnected, address, connectWallet, network } = useWallet()
+  // Restore missing state hooks (must be before any usage)
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [sellMode, setSellMode] = useState<boolean>(true);
+  const [selectedPoolKey, setSelectedPoolKey] = useState<PoolKey | null>(null);
+  const [poolKeyInput, setPoolKeyInput] = useState<string>('');
+  const [autoSelectedPool, setAutoSelectedPool] = useState<any>(null);
+
+  const { isConnected, address } = useAccount()
   const {
     swapState,
     validation,
@@ -307,104 +332,101 @@ export function SwapForm() {
     executeSwap,
     validateSwap
   } = useV4Swap()
-  const { pools: allPools, loading: poolsLoading } = useAllPools();
-  const { pools: bscPools, loading: bscPoolsLoading } = useBSCPools();
+  const [allPools, setAllPools] = useState<any[]>([]);
+  const [poolsLoading, setPoolsLoading] = useState(true);
 
-  // Flatten pools if it's an array of arrays
-  const flatPools = Array.isArray(allPools[0]) ? allPools.flat() : allPools;
-
-  // Log the full pools response for debugging
+  // Fetch all pools from the new API endpoint in config
   useEffect(() => {
-    console.log('Raw pools response from useAllPools:', allPools);
-    console.log('Raw pools response from useBSCPools:', bscPools);
-    console.log('Flattened pools:', flatPools);
-  }, [allPools, bscPools]);
+    setPoolsLoading(true);
+    fetch(GRAPHQL_ENDPOINTS.all)
+      .then(res => res.json())
+      .then(data => {
+        setAllPools(data.Pool || []);
+        setPoolsLoading(false);
+      })
+      .catch(() => setPoolsLoading(false));
+  }, []);
 
-  const [error, setError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const [sellMode, setSellMode] = useState<boolean>(true)
-  const [selectedPoolKey, setSelectedPoolKey] = useState<PoolKey | null>(null)
-  const [poolKeyInput, setPoolKeyInput] = useState<string>('')
-  const [autoSelectedPool, setAutoSelectedPool] = useState<any>(null)
+  // Debug: Log all fetched pools to the console whenever they change
+  useEffect(() => {
+    if (allPools.length > 0) {
+      console.log('Fetched all pools:', allPools);
+    }
+  }, [allPools]);
 
   // Auto-select best pool when tokens are chosen and user is on any supported network
   useEffect(() => {
     if (
-      network?.id &&
       swapState.tokenIn &&
       swapState.tokenOut &&
-      ((network.id === 56 && bscPools.length > 0 && !bscPoolsLoading) || (network.id !== 56 && flatPools.length > 0 && !poolsLoading))
+      allPools.length > 0 && !poolsLoading
     ) {
       (async () => {
         const tokenInAddress = swapState.tokenIn?.address?.toLowerCase();
         const tokenOutAddress = swapState.tokenOut?.address?.toLowerCase();
         if (!tokenInAddress || !tokenOutAddress) return;
 
-        if (network.id === 56) {
-          // BSC: Use bscPools and findBestPool (by lowest fee)
-          const bestPool = findBestPool(bscPools, tokenInAddress, tokenOutAddress);
-          if (bestPool) {
-            const poolKey = convertBSCPoolToPoolKey(bestPool, tokenInAddress, tokenOutAddress);
-            setAutoSelectedPool(bestPool);
-            setSelectedPoolKey(poolKey);
-            setPoolKeyInput(JSON.stringify(poolKey, null, 2));
-            updatePoolId(JSON.stringify(poolKey));
-          } else {
-            setAutoSelectedPool(null);
-            setSelectedPoolKey(null);
-            setPoolKeyInput('');
-            updatePoolId('');
-          }
+        // Find all pools that match the token pair (parse after _)
+        const matchingPools = allPools.filter(pool => {
+          const poolToken0 = pool.token0.split('_')[1]?.toLowerCase();
+          const poolToken1 = pool.token1.split('_')[1]?.toLowerCase();
+          return (
+            (poolToken0 === tokenInAddress && poolToken1 === tokenOutAddress) ||
+            (poolToken0 === tokenOutAddress && poolToken1 === tokenInAddress)
+          );
+        });
+
+        if (matchingPools.length === 0) {
+          setAutoSelectedPool(null);
+          setSelectedPoolKey(null);
+          setPoolKeyInput('');
+          updatePoolId('');
+          return;
+        }
+
+        // Fetch liquidity for each pool
+        const chainId = 1; // fallback to Ethereum mainnet
+        const rpcUrl = import.meta.env.VITE_BSC_MAINNET_RPC_URL;
+        const { generatePoolId, getPoolInfo } = await import('../../utils/stateViewUtils');
+        const { convertPoolToPoolKey } = await import('../../utils/poolSelectionUtils');
+
+        const poolsWithLiquidity = await Promise.all(
+          matchingPools.map(async (pool) => {
+            const poolKey = convertPoolToPoolKey(pool);
+            const poolId = generatePoolId(poolKey);
+            let liquidity = 0n;
+            try {
+              const info = await getPoolInfo(chainId, rpcUrl, poolId);
+              liquidity = BigInt(info.liquidity || '0');
+            } catch {}
+            return { pool, fee: typeof pool.feeTier === 'string' ? parseInt(pool.feeTier) : pool.feeTier, liquidity };
+          })
+        );
+
+        // Sort by liquidity descending only
+        poolsWithLiquidity.sort((a, b) => {
+          return b.liquidity > a.liquidity ? 1 : b.liquidity < a.liquidity ? -1 : 0;
+        });
+
+        const bestPool = poolsWithLiquidity[0]?.pool;
+        if (bestPool) {
+          const poolKey = convertPoolToPoolKey(bestPool);
+          setAutoSelectedPool(bestPool);
+          setSelectedPoolKey(poolKey);
+          setPoolKeyInput(JSON.stringify(poolKey, null, 2));
+          updatePoolId(JSON.stringify(poolKey));
         } else {
-          // Other networks: Use allPools and findBestPoolByLiquidity
-          const filteredPools = flatPools.filter((pool: any) =>
-            Number(pool.chainId) === Number(network.id) &&
-            (
-              (pool.token0.split('_')[1]?.toLowerCase() === tokenInAddress &&
-                pool.token1.split('_')[1]?.toLowerCase() === tokenOutAddress) ||
-              (pool.token0.split('_')[1]?.toLowerCase() === tokenOutAddress &&
-                pool.token1.split('_')[1]?.toLowerCase() === tokenInAddress)
-            )
-          );
-          if (filteredPools.length === 0) {
-            setAutoSelectedPool(null);
-            setSelectedPoolKey(null);
-            setPoolKeyInput('');
-            updatePoolId('');
-            return;
-          }
-          const rpcUrl = import.meta.env[`VITE_RPC_URL_${network.id}`] || '';
-          const bestPool = await findBestPoolByLiquidity(
-            filteredPools,
-            tokenInAddress,
-            tokenOutAddress,
-            network.id,
-            rpcUrl
-          );
-          if (bestPool) {
-            const poolKey = convertPoolToPoolKey(bestPool);
-            setAutoSelectedPool(bestPool);
-            setSelectedPoolKey(poolKey);
-            setPoolKeyInput(JSON.stringify(poolKey, null, 2));
-            updatePoolId(JSON.stringify(poolKey));
-          } else {
-            setAutoSelectedPool(null);
-            setSelectedPoolKey(null);
-            setPoolKeyInput('');
-            updatePoolId('');
-          }
+          setAutoSelectedPool(null);
+          setSelectedPoolKey(null);
+          setPoolKeyInput('');
+          updatePoolId('');
         }
       })();
     }
-  }, [network?.id, swapState.tokenIn, swapState.tokenOut, flatPools, allPools, poolsLoading, bscPools, bscPoolsLoading]);
+  }, [swapState.tokenIn, swapState.tokenOut, allPools, poolsLoading]);
   
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
-      try {
-        await connectWallet();
-      } catch (error: any) {
-        setError(error.message || 'Failed to connect wallet');
-      }
       return;
     }
     
@@ -433,8 +455,8 @@ export function SwapForm() {
             token0Symbol: poolInfo.token0Symbol,
             token1Symbol: poolInfo.token1Symbol,
             fee: poolInfo.fee,
-            networkId: network?.id || 1,
-            networkName: network?.name || 'Ethereum',
+            networkId: 1,
+            networkName: 'Ethereum',
             timestamp: Date.now()
           };
           addDeployedPool(JSON.stringify(newPool));
@@ -448,20 +470,19 @@ export function SwapForm() {
   }
   
   const getButtonText = () => {
-    if (!isConnected) return 'Connect Wallet';
     if (!selectedPoolKey) return 'Enter/Select Pool Key';
     if (isValidatingPool) return 'Validating Pool...';
     if (!swapState.tokenIn) return 'Select input token';
     if (!swapState.tokenOut) return 'Select output token';
     if (!swapState.amountIn) return 'Enter an amount';
     if (isSwapping) return 'Swapping...';
-    if (autoSelectedPool && network?.id) return 'Swap (Auto-Selected)';
+    if (autoSelectedPool && isConnected) return 'Swap (Auto-Selected)';
     return 'Swap';
   }
   
   const isButtonDisabled = () => {
-    if (!isConnected) return false;
     return (
+      !isConnected ||
       !selectedPoolKey ||
       isValidatingPool ||
       !swapState.tokenIn ||
@@ -499,8 +520,8 @@ export function SwapForm() {
       token0Symbol: pool.token0.symbol,
       token1Symbol: pool.token1.symbol,
       fee: pool.fee,
-      networkId: network?.id || 1,
-      networkName: network?.name || 'Ethereum',
+      networkId: 1,
+      networkName: 'Ethereum',
       timestamp: Date.now()
     };
     addDeployedPool(JSON.stringify(newPool));
@@ -537,29 +558,10 @@ export function SwapForm() {
     setSuccessMessage(null);
   }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, selectedPoolKey]);
   
-  // Debug: Display all returned pools
-  const debugPools = (
-    <div style={{ margin: '16px 0', padding: '8px', background: '#eee', borderRadius: '8px', fontSize: '12px' }}>
-      <strong>All Pools (raw):</strong>
-      <div style={{ maxHeight: 200, overflow: 'auto' }}>
-        {flatPools.length === 0 ? (
-          <div>No pools returned from backend.</div>
-        ) : (
-          flatPools.map((pool: any, idx: number) => (
-            <div key={pool.id || idx} style={{ marginBottom: 4 }}>
-              <span>chainId: {pool.chainId} | token0: {pool.token0} | token1: {pool.token1} | feeTier: {pool.feeTier}</span>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
 
   return (
     <Container>
       <MainContent>
-        {/* <TestPoolDeployer onPoolDeployed={handlePoolDeployed} />
-         */}
         <SwapContainer>
           <SwapHeader>
             <SwapTabs>
@@ -578,99 +580,82 @@ export function SwapForm() {
             />
           </SwapHeader>
 
-          {/* Pool Key Input Section */}
-          <PoolIdSection>
-            <PoolIdLabel>Pool Key</PoolIdLabel>
-            <PoolIdInputContainer>
-              <PoolKeyTextArea
-                placeholder='Paste pool key JSON here:
-{"currency0":"0x...","currency1":"0x...","fee":3000,"tickSpacing":60,"hooks":"0x0000..."}'
-                value={poolKeyInput}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setPoolKeyInput(value);
-                  
-                  // Clear auto-selected pool when user manually changes pool key
-                  setAutoSelectedPool(null);
-                  
-                  if (value.trim() === '') {
-                    setSelectedPoolKey(null);
-                    updatePoolId('');
-                    return;
-                  }
-                  
-                  try {
-                    const parsedPoolKey = JSON.parse(value);
-                    if (parsedPoolKey.currency0 && parsedPoolKey.currency1 && typeof parsedPoolKey.fee === 'number' && typeof parsedPoolKey.tickSpacing === 'number') {
-                      setSelectedPoolKey(parsedPoolKey);
-                      updatePoolId(value);
-                      console.log('Valid pool key set:', parsedPoolKey);
-                    } else {
-                      console.log('Invalid pool key structure:', parsedPoolKey);
+          {/* Pool Key Input Section (hidden UI, logic preserved) */}
+          <div style={{ display: 'none' }}>
+            <PoolIdSection>
+              <PoolIdLabel>Pool Key</PoolIdLabel>
+              <PoolIdInputContainer>
+                <PoolKeyTextArea
+                  placeholder='Paste pool key JSON here:{"currency0":"0x...","currency1":"0x...","fee":3000,"tickSpacing":60,"hooks":"0x0000..."}'
+                  value={poolKeyInput}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setPoolKeyInput(value);
+                    setAutoSelectedPool(null);
+                    if (value.trim() === '') {
+                      setSelectedPoolKey(null);
+                      updatePoolId('');
+                      return;
+                    }
+                    try {
+                      const parsedPoolKey = JSON.parse(value);
+                      if (parsedPoolKey.currency0 && parsedPoolKey.currency1 && typeof parsedPoolKey.fee === 'number' && typeof parsedPoolKey.tickSpacing === 'number') {
+                        setSelectedPoolKey(parsedPoolKey);
+                        updatePoolId(value);
+                        console.log('Valid pool key set:', parsedPoolKey);
+                      } else {
+                        console.log('Invalid pool key structure:', parsedPoolKey);
+                        setSelectedPoolKey(null);
+                      }
+                    } catch (error) {
+                      console.log('JSON parse error:', error);
                       setSelectedPoolKey(null);
                     }
-                  } catch (error) {
-                    // Invalid JSON, keep the input but don't set selectedPoolKey
-                    console.log('JSON parse error:', error);
-                    setSelectedPoolKey(null);
-                  }
-                }}
-              />
-            </PoolIdInputContainer>
-            {selectedPoolKey && (
-              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                ✓ Valid Pool: {selectedPoolKey.currency0.slice(0, 6)}...{selectedPoolKey.currency0.slice(-4)} / {selectedPoolKey.currency1.slice(0, 6)}...{selectedPoolKey.currency1.slice(-4)} | Fee: {(selectedPoolKey.fee / 10000).toFixed(2)}%
-              </div>
-            )}
-            {autoSelectedPool && (
-              <div style={{ 
-                fontSize: '12px', 
-                color: '#4CAF50', 
-                marginTop: '4px',
-                padding: '4px 8px',
-                backgroundColor: '#4CAF5020',
-                borderRadius: '4px',
-                border: '1px solid #4CAF5040'
-              }}>
-                🚀 Auto-selected Pool: {autoSelectedPool.token0.split('_')[1]?.slice(0, 6)}.../{autoSelectedPool.token1.split('_')[1]?.slice(0, 6)}... | Fee: {((typeof autoSelectedPool.feeTier === 'string' ? parseInt(autoSelectedPool.feeTier) : autoSelectedPool.feeTier) / 10000).toFixed(2)}%
-              </div>
-            )}
-            {isValidatingPool && (
-              <ValidatingText>Validating pool...</ValidatingText>
-            )}
-            {poolInfo && selectedPoolKey && (
-              <PoolInfoContainer>
-                <PoolInfoTitle>
-                  {poolInfo.token0Symbol}/{poolInfo.token1Symbol} Pool
-                </PoolInfoTitle>
-                <PoolInfoDetail>
-                  <span>Fee:</span>
-                  <span>{(poolInfo.fee / 10000).toFixed(2)}%</span>
-                </PoolInfoDetail>
-                <PoolInfoDetail>
-                  <span>Liquidity:</span>
-                  <span>{poolInfo.liquidity}</span>
-                </PoolInfoDetail>
-                <PoolInfoDetail>
-                  <span>Current Tick:</span>
-                  <span>{poolInfo.tick}</span>
-                </PoolInfoDetail>
-              </PoolInfoContainer>
-            )}
-            {validation.poolIdError && (
-              <ErrorMessage>{validation.poolIdError}</ErrorMessage>
-            )}
-            {poolsLoading && (
-              <div style={{ 
-                fontSize: '12px', 
-                color: '#666', 
-                marginTop: '4px',
-                fontStyle: 'italic'
-              }}>
-                🔄 Loading pools...
-              </div>
-            )}
-          </PoolIdSection>
+                  }}
+                />
+              </PoolIdInputContainer>
+              {selectedPoolKey && (
+                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                  ✓ Valid Pool: {selectedPoolKey.currency0.slice(0, 6)}...{selectedPoolKey.currency0.slice(-4)} / {selectedPoolKey.currency1.slice(0, 6)}...{selectedPoolKey.currency1.slice(-4)} | Fee: {(selectedPoolKey.fee / 10000).toFixed(2)}%
+                </div>
+              )}
+              {autoSelectedPool && (
+                <div style={{ fontSize: '12px', color: '#4CAF50', marginTop: '4px', padding: '4px 8px', backgroundColor: '#4CAF5020', borderRadius: '4px', border: '1px solid #4CAF5040' }}>
+                  🚀 Auto-selected Pool: {autoSelectedPool.currency0?.slice(0, 6)}.../{autoSelectedPool.currency1?.slice(0, 6)}... | Fee: {((typeof autoSelectedPool.fee === 'string' ? parseInt(autoSelectedPool.fee) : autoSelectedPool.fee) / 10000).toFixed(2)}%
+                </div>
+              )}
+              {isValidatingPool && (
+                <ValidatingText>Validating pool...</ValidatingText>
+              )}
+              {poolInfo && selectedPoolKey && (
+                <PoolInfoContainer>
+                  <PoolInfoTitle>
+                    {poolInfo.token0Symbol}/{poolInfo.token1Symbol} Pool
+                  </PoolInfoTitle>
+                  <PoolInfoDetail>
+                    <span>Fee:</span>
+                    <span>{(poolInfo.fee / 10000).toFixed(2)}%</span>
+                  </PoolInfoDetail>
+                  <PoolInfoDetail>
+                    <span>Liquidity:</span>
+                    <span>{poolInfo.liquidity}</span>
+                  </PoolInfoDetail>
+                  <PoolInfoDetail>
+                    <span>Current Tick:</span>
+                    <span>{poolInfo.tick}</span>
+                  </PoolInfoDetail>
+                </PoolInfoContainer>
+              )}
+              {validation.poolIdError && (
+                <ErrorMessage>{validation.poolIdError}</ErrorMessage>
+              )}
+              {poolsLoading && (
+                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>
+                  🔄 Loading pools...
+                </div>
+              )}
+            </PoolIdSection>
+          </div>
           
           {/* Input (From) section */}
           <InputContainer>
@@ -721,13 +706,13 @@ export function SwapForm() {
             {swapState.tokenOut && <USDValue>$0.00</USDValue>}
           </InputContainer>
           
-          {/* Swap button */}
+          {/* Swap button (always visible, disabled if not ready) */}
           <ActionButton
             onClick={handleSwapButtonClick}
             $disabled={isButtonDisabled()}
             disabled={isButtonDisabled()}
           >
-            {getButtonText()}
+            Swap
           </ActionButton>
           
           {error && <ErrorMessage>{error}</ErrorMessage>}
@@ -735,9 +720,10 @@ export function SwapForm() {
         </SwapContainer>
       </MainContent>
       
-      {/* Deployed Pools List */}
-      <DeployedPoolsList onSelectPool={handleSelectPool} />
-      
+      {/* Deployed Pools List (hidden UI, logic preserved) */}
+      <div style={{ display: 'none' }}>
+        <DeployedPoolsList onSelectPool={handleSelectPool} />
+      </div>
       {/* Loading Overlay */}
       {isSwapping && (
         <LoadingOverlay>
@@ -749,7 +735,6 @@ export function SwapForm() {
           </LoadingContainer>
         </LoadingOverlay>
       )}
-      {debugPools}
     </Container>
   )
 }

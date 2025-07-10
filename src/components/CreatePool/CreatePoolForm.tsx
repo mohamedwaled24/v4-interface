@@ -6,7 +6,7 @@ import { HookInput } from './HookInput'
 import { ResetButton } from '../shared/ResetButton'
 import { Info } from '../shared/icons'
 import { useInitializePool } from '../../hooks/useInitializePool'
-import { useWallet } from '../../hooks/useWallet'
+import { useWalletContext } from '../../contexts/WalletContext'
 import { useV4Position } from '../../hooks/useV4Position'
 import PriceRangeSelector from './PriceRangeSelector'
 import DepositAmountInputs from './DepositAmountInputs'
@@ -279,7 +279,7 @@ export function CreatePoolForm() {
     tick: number;
   } | null>(null)
   
-  const { isConnected, connectWallet, chainId, network } = useWallet()
+  const { isConnected, connectWallet, chainId, network } = useWalletContext()
   const {
     poolState,
     validation,

@@ -2,21 +2,42 @@ import { useQuery, gql } from '@apollo/client';
 
 export const ALL_POOLS_QUERY = gql`
   query Pool {
-  Pool {
-    id
-    chainId
-    token0
-    token1
-    feeTier
-    tickSpacing
-    hooks
-    liquidity
-    tick
-    sqrtPrice
-    name
-    createdAtTimestamp
+    Pool {
+      id
+      chainId
+      name
+      createdAtTimestamp
+      createdAtBlockNumber
+      token0
+      token1
+      feeTier
+      liquidity
+      sqrtPrice
+      token0Price
+      token1Price
+      tick
+      tickSpacing
+      observationIndex
+      volumeToken0
+      volumeToken1
+      volumeUSD
+      untrackedVolumeUSD
+      feesUSD
+      feesUSDUntracked
+      txCount
+      collectedFeesToken0
+      collectedFeesToken1
+      collectedFeesUSD
+      totalValueLockedToken0
+      totalValueLockedToken1
+      totalValueLockedETH
+      totalValueLockedUSD
+      totalValueLockedUSDUntracked
+      liquidityProviderCount
+      hooks
+      db_write_timestamp
+    }
   }
-}
 `;
 
 export function useAllPools() {

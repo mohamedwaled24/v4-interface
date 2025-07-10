@@ -3,7 +3,7 @@ import styled from 'styled-components'
 import { Token } from '../../types'
 import { useBalance } from '../../hooks/useBalance'
 import { TokenModal } from './TokenModal'
-import { useWallet } from '../../hooks/useWallet'
+import { useWalletContext } from '../../contexts/WalletContext'
 
 interface Props {
   label: string
@@ -35,6 +35,9 @@ const InputContainer = styled.div<{ $error?: boolean }>`
   border-radius: 20px;
   transition: border-color ${({ theme }) => theme.transition.duration.fast} ease;
   cursor: pointer;
+  min-width: 140px;
+  width: 100%;
+  max-width: 220px;
 
   &:hover {
     border-color: ${({ theme, $error }) =>
@@ -49,6 +52,9 @@ const TokenPlaceholder = styled.div`
   gap: 8px;
   color: ${({ theme }) => theme.colors.neutral2};
   font-size: 20px;
+  margin:8px;
+  min-width: 110px;
+  white-space: nowrap;
 `
 
 const TokenInfo = styled.div`
@@ -101,8 +107,8 @@ const ErrorMessage = styled.div`
 
 
 export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }) => {
-  const { balance } = useBalance(token?.address)
-  const { chainId } = useWallet()
+  const { chainId } = useWalletContext()
+  const { balance } = useBalance(token?.address, token?.chainId ?? chainId ?? undefined)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
   const handleOpenModal = () => {

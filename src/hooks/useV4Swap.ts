@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { useWallet } from './useWallet'
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
 import { parseUnits, keccak256, encodePacked, encodeAbiParameters, maxUint256, encodeFunctionData, getAddress } from 'viem'
 import { SUPPORTED_NETWORKS } from '../constants/networks'
 import { CONTRACTS } from '../constants/contracts'
@@ -86,7 +86,11 @@ const PERMIT2_BATCH_TYPES = {
 };
 
 export function useV4Swap() {
-  const { publicClient, walletClient, chainId, address, isConnected, network } = useWallet()
+  const { isConnected, address } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const publicClient = usePublicClient();
+  // Prefer walletClient.chain.id, fallback to publicClient.chain.id, fallback to 1 (mainnet)
+  const chainId = walletClient?.chain.id || publicClient?.chain?.id || 1;
 
   const getChainFromId = (chainId: number) => {
     const network = SUPPORTED_NETWORKS.find(net => net.id === chainId);

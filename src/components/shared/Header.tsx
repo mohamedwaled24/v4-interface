@@ -1,17 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react'
 import styled from 'styled-components'
-import { useWallet } from '../../hooks/useWallet'
+import { useWalletContext } from '../../contexts/WalletContext'
 import { SUPPORTED_NETWORKS } from '../../constants/networks'
 import { NetworkDropdown } from './NetworkDropdown'
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-
+import uniswapLogo from "../../../public/uniswapLogo2.png"
+import { Search } from './icons/Search';
+import { X } from './icons/X';
 
 // Define interface for navigation types
 export enum NavType {
   TRADE = 'trade',
   EXPLORE = 'explore',
   POOL = 'pool',
-  BSC_POOLS = 'bsc_pools'
 }
 
 interface HeaderProps {
@@ -21,42 +22,82 @@ interface HeaderProps {
 
 const HeaderContainer = styled.header`
   display: flex;
-  justify-content: space-between;
+  flex-direction: row;
   align-items: center;
-  padding: 16px 24px;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
-`
+  justify-content: space-between;
+  padding: 8px 20px; /* Reduced vertical padding */
+  background-color: white;
+  min-height: 56px;
+  height: 56px;
+`;
+
+const LogoContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+`;
+
+const LogoIcon = styled.div`
+  display: flex;
+  align-items: center;
+  height: 32px;
+  width: 32px;
+  margin-right: 4px;
+  img {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+  }
+`;
 
 const Logo = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
   font-size: ${({ theme }) => theme.fontSizes.h3};
   font-weight: ${({ theme }) => theme.fontWeights.semibold};
-  color: ${({ theme }) => theme.colors.neutral1};
-`
+  color: rgb(255, 55, 199);
+  height: 32px;
+  @media (max-width: 600px) {
+    display: none;
+  }
+`;
 
-const LogoIcon = styled.div`
-  color: ${({ theme }) => theme.colors.accentAction};
+const LogoDropdown = styled.button`
+  display: none;
+  background: none;
+  border: none;
+  align-items: center;
+  justify-content: center;
   font-size: 24px;
-`
+  color: black;
+  cursor: pointer;
+  @media (max-width: 600px) {
+    display: flex;
+    margin-left: 4px;
+  }
+`;
 
 const NavLinks = styled.div`
   display: flex;
   gap: 32px;
-`
+  margin-left: 24px;
+  @media (max-width: 600px) {
+    gap: 20px;
+  }
+`;
 
 const NavLink = styled.a<{ $active?: boolean }>`
-  color: ${({ theme, $active }) => 
-    $active ? theme.colors.neutral1 : theme.colors.neutral2};
-  font-size: ${({ theme }) => theme.fontSizes.large};
+  color: ${({ theme, $active }) =>
+    $active ? `#131313` : `#131313A1`};
+  font-size: 20px;
   font-weight: ${({ theme, $active }) => 
     $active ? theme.fontWeights.semibold : theme.fontWeights.medium};
   text-decoration: none;
   cursor: pointer;
   
   &:hover {
-    color: ${({ theme }) => theme.colors.neutral1};
+    color: ${({ theme }) => theme.colors.black};
   }
 `
 
@@ -65,6 +106,22 @@ const RightSection = styled.div`
   align-items: center;
   gap: 16px;
 `
+
+const SearchButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: ${({ theme }) => theme.colors.neutral2};
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: color 0.2s;
+  &:hover {
+    color: ${({ theme }) => theme.colors.neutral1};
+  }
+`;
 
 // const ConnectButton = styled.button`
 //   background: ${({ theme }) => theme.colors.accentAction};
@@ -172,7 +229,7 @@ const ChevronIcon = styled.span<{ $isOpen: boolean }>`
 `
 
 const NetworkDropdownComponent = () => {
-  const { network, chainId, switchNetwork } = useWallet()
+  const { network, chainId, switchNetwork } = useWalletContext()
   const [isNetworkDropdownOpen, setIsNetworkDropdownOpen] = useState(false)
   const networkDropdownRef = useRef<HTMLDivElement>(null)
   
@@ -290,10 +347,12 @@ const WalletDisconnectButton = styled.button`
 `
 
 export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
-  const { isConnected, address, connectWallet, disconnectWallet, balance, network } = useWallet()
+  const { isConnected, address, connectWallet, disconnectWallet, network } = useWalletContext()
   const [isConnecting, setIsConnecting] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  // Dropdown open state for mobile logo
+  const [logoDropdownOpen, setLogoDropdownOpen] = useState(false);
   
   const handleConnectWallet = async () => {
     if (typeof window.ethereum === 'undefined') {
@@ -332,38 +391,50 @@ export const Header: React.FC<HeaderProps> = ({ activeNav, onNavChange }) => {
   
   return (
     <HeaderContainer>
-      <Logo>
-        Uniswap v4 Contracts Playground
-      </Logo>
-      
-      <NavLinks>
-        <NavLink 
-          $active={activeNav === NavType.TRADE} 
-          onClick={() => onNavChange(NavType.TRADE)}
-        >
-          Trade
-        </NavLink>
-        <NavLink 
-          $active={activeNav === NavType.EXPLORE} 
-          onClick={() => onNavChange(NavType.EXPLORE)}
-        >
-          Explore
-        </NavLink>
-        <NavLink 
-          $active={activeNav === NavType.POOL} 
-          onClick={() => onNavChange(NavType.POOL)}
-        >
-          Pool
-        </NavLink>
-        <NavLink 
-          $active={activeNav === NavType.BSC_POOLS} 
-          onClick={() => onNavChange(NavType.BSC_POOLS)}
-        >
-          BSC Pools
-        </NavLink>
-      </NavLinks>
-      
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <LogoContainer>
+          <LogoIcon>
+            <img src={uniswapLogo} alt="Uniswap Logo" />
+          </LogoIcon>
+          <Logo>Uniswap</Logo>
+          <LogoDropdown onClick={() => setLogoDropdownOpen((v) => !v)}>
+            <span style={{ fontSize: 24 }}>&#9776;</span>
+          </LogoDropdown>
+          {/* Simple dropdown placeholder, can be replaced with a real menu */}
+          {logoDropdownOpen && (
+            <div style={{ position: 'absolute', top: 56, left: 12, background: '#fff', border: '1px solid #eee', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', zIndex: 1000 }}>
+              <button style={{ background: 'none', border: 'none', padding: 12, width: 120, textAlign: 'left', cursor: 'pointer' }} onClick={() => setLogoDropdownOpen(false)}>
+                <X width={18} height={18} style={{ float: 'right' }} />
+                Menu
+              </button>
+            </div>
+          )}
+        </LogoContainer>
+        <NavLinks>
+          <NavLink 
+            $active={activeNav === NavType.TRADE} 
+            onClick={() => onNavChange(NavType.TRADE)}
+          >
+            Trade
+          </NavLink>
+          <NavLink 
+            $active={activeNav === NavType.EXPLORE} 
+            onClick={() => onNavChange(NavType.EXPLORE)}
+          >
+            Explore
+          </NavLink>
+          <NavLink 
+            $active={activeNav === NavType.POOL} 
+            onClick={() => onNavChange(NavType.POOL)}
+          >
+            Pool
+          </NavLink>
+        </NavLinks>
+      </div>
       <RightSection>
+        <SearchButton aria-label="Search">
+          <Search width={22} height={22} />
+        </SearchButton>
         {/* <NetworkDropdown /> */}
         <ConnectButton />
         

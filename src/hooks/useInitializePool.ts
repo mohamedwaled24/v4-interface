@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { parseUnits, formatUnits, maxUint256, encodeFunctionData } from 'viem'
 import { mainnet, sepolia , bsc} from 'viem/chains'
-import { useWallet } from './useWallet'
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
 import { CONTRACTS } from '../constants/contracts'
 import { generatePoolId } from '../utils/stateViewUtils'
 import permit2Abi from '../../contracts/permit2.json'
@@ -132,7 +132,11 @@ const formatNumberForMetaMask = (value: any): string => {
 };
 
 export function useInitializePool() {
-  const { publicClient, walletClient, chainId, address: userAddress, isConnected, network } = useWallet()
+  const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
+  const { address: userAddress, isConnected } = useAccount();
+  // For chainId, use walletClient?.chain.id or publicClient?.chain?.id or fallback
+  const chainId = walletClient?.chain.id || publicClient?.chain?.id || 1;
   const [isInitializing, setIsInitializing] = useState(false)
 
   // Pool state management for CreatePoolForm UI
