@@ -4,28 +4,26 @@ import { TokenSelector } from '../CreatePool/TokenSelector'
 import { SwapSettings } from './SwapSettings'
 import { useV4Swap } from '../../hooks/useV4Swap'
 import { useAccount, useWalletClient } from 'wagmi'
-import { findBestPoolByLiquidity, findBestPool, convertPoolToPoolKey, convertBSCPoolToPoolKey } from '../../utils/poolSelectionUtils'
+import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { ArrowDown } from '../shared/icons'
-import { TestPoolDeployer } from './TestPoolDeployer'
 import { DeployedPoolsList, addDeployedPool } from './DeployedPoolsList'
 import { GRAPHQL_ENDPOINTS } from '../../config/graphql';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { SUPPORTED_NETWORKS } from '../../constants/networks';
+import { useBalance } from '../../hooks/useBalance'
 
 const Container = styled.div`
   display: flex;
   justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  width: 100vw;
-  padding: 0;
+  align-items: flex-start;
+  width: 100%;
+  padding:20px;
   box-sizing: border-box;
   flex-direction: column;
   position: relative;
   @media (max-width: 768px) {
     flex-direction: column;
     min-height: auto;
-    padding: 16px 0;
+    padding: 16px;
   }
 `
 
@@ -34,12 +32,12 @@ const MainContent = styled.div`
   flex-direction: column;
   gap: 24px;
   width: 100%;
-  max-width: 540px;
+  max-width: 480px;
   align-items: center;
   justify-content: center;
   margin: 0 auto;
   @media (max-width: 768px) {
-    max-width: 98vw;
+    max-width: 100%;
   }
 `
 
@@ -51,41 +49,50 @@ const SwapContainer = styled.div`
   flex-direction: column;
   gap: 16px;
   width: 100%;
-  box-shadow: 0 4px 32px rgba(0,0,0,0.08);
+  position: relative;
   @media (max-width: 768px) {
     padding: 16px;
   }
-    margin:auto;
 `
 
 const SwapHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 8px;
+  padding: 10px 0px;
+  margin-top: -30px;
 `
 
 const SwapTabs = styled.div`
   display: flex;
-  gap: 8px;
+  gap: 4px;
+  background: transparent;
+  border-radius: 12px;
+  padding: 4px;
 `
 
 const SwapTab = styled.button<{ $active?: boolean }>`
-  background: none;
+  background: ${({ $active }) => 
+    $active ? 'rgba(0, 0, 0, 0.02)' : 'transparent'};
   border: none;
-  padding: 8px 12px;
-  font-size: 16px;
-  font-weight: ${({ $active }) => ($active ? '600' : '400')};
-  color: ${({ theme, $active }) => 
-    $active ? theme.colors.neutral1 : theme.colors.neutral3};
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: ${({ $active }) => ($active ? '600' : '500')};
+  color: ${({ $active }) => 
+    $active ? '#131313' : '#131313A1'};
   cursor: pointer;
-  border-radius: 12px;
-  background: ${({ $active, theme }) => $active ? theme.colors.backgroundInteractive || '#f3f3f3' : 'none'};
-  transition: background 0.2s;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: ${({ $active }) => 
+      $active ? 'rgba(0, 0, 0, 0.02)' : 'rgba(0, 0, 0, 0.01)'};
+    color: #131313;
+  }
 `
 
 const InputContainer = styled.div`
-  background: grey;
+  background: rgba(51, 51, 51, 0.02);
   border-radius: 12px;
   padding: 16px;
   display: flex;
@@ -109,7 +116,7 @@ const InputRow = styled.div`
 const AmountInput = styled.input`
   background: none;
   border: none;
-  color: ${({ theme }) => theme.colors.neutral1};
+  color: #131313;
   font-size: 24px;
   font-weight: 500;
   outline: none;
@@ -118,7 +125,7 @@ const AmountInput = styled.input`
   width: 100%;
   
   &::placeholder {
-    color: ${({ theme }) => theme.colors.neutral3};
+    color: #666;
   }
 `
 
@@ -127,11 +134,28 @@ const USDValue = styled.div`
   color: ${({ theme }) => theme.colors.neutral2};
 `
 
+const TokenBalance = styled.div`
+  font-size: 14px;
+  color: ${({ theme }) => theme.colors.neutral2};
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+`
+
+const BalanceAmount = styled.span`
+  color: ${({ theme }) => theme.colors.neutral2};
+  font-weight: 500;
+`
+
 const SwapButtonContainer = styled.div`
   display: flex;
   justify-content: center;
-  position: relative;
-  margin: 4px 0;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  top: 50%;
+  margin-top: -30px;
 `
 
 const IconBackground = styled.div`
@@ -145,7 +169,8 @@ const IconBackground = styled.div`
   cursor: pointer;
   border: 4px solid ${({ theme }) => theme.colors.backgroundModule};
   color: ${({ theme }) => theme.colors.neutral2};
-  
+  z-index: 10;
+
   &:hover {
     color: ${({ theme }) => theme.colors.neutral1};
     background: ${({ theme }) => theme.colors.backgroundInteractive};
@@ -218,23 +243,46 @@ const PoolInfoDetail = styled.div`
 
 const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary'; $disabled?: boolean }>`
   width: 100%;
-  padding: 16px;
+  padding: 16px 20px ;
   border-radius: 20px;
   border: none;
-  background: ${({ theme, $variant, $disabled }) => 
-    $disabled ? theme.colors.backgroundInteractive : 
-    $variant === 'secondary' ? theme.colors.backgroundInteractive : theme.colors.accentAction};
-  color: ${({ theme, $disabled }) => 
-    $disabled ? theme.colors.neutral3 : theme.colors.neutral1};
+  transform: scale(1);
+  background-color: rgba(255, 55, 199, 0.08);
+  outline-color: rgba(0, 0, 0, 0);
+  color: rgb(255, 55, 199);
+  font-weight: 600;
   font-size: 16px;
-  font-weight: 500;
   cursor: ${({ $disabled }) => ($disabled ? 'not-allowed' : 'pointer')};
   transition: opacity 0.2s ease;
   
   &:hover:not(:disabled) {
     opacity: 0.9;
+    background-color: rgba(255, 55, 199, 0.12);
   }
+    &:disabled {
+      color: gray;
+      opacity: 0.5;
+      cursor: not-allowed;
+      }
 `
+
+const ConnectWalletButton = styled.button`
+  width: 100%;
+  padding: 16px 20px;
+  border-radius: 999px;
+  border: none;
+  background-image: linear-gradient(25deg, #741ff5, #e348ff);
+  color: #fff;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.77, 0, 0.175, 1);
+  transform: scale(1);
+
+  &:hover, &:focus {
+    transform: scale(1.04);
+  }
+`;
 
 const ErrorMessage = styled.div`
   color: ${({ theme }) => theme.colors.accentFailure};
@@ -312,11 +360,13 @@ export function SwapForm() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [sellMode, setSellMode] = useState<boolean>(true);
+  const [activeTab, setActiveTab] = useState<'swap' | 'limit' | 'buy' | 'sell'>('swap');
   const [selectedPoolKey, setSelectedPoolKey] = useState<PoolKey | null>(null);
   const [poolKeyInput, setPoolKeyInput] = useState<string>('');
   const [autoSelectedPool, setAutoSelectedPool] = useState<any>(null);
 
   const { isConnected, address } = useAccount();
+  const { openConnectModal } = useConnectModal()
   const { data: walletClient } = useWalletClient();
   const {
     swapState,
@@ -334,10 +384,25 @@ export function SwapForm() {
     executeSwap,
     validateSwap
   } = useV4Swap()
+  
+  // Get balances for selected tokens
+  const { balance: tokenInBalance } = useBalance(
+    swapState.tokenIn?.address,
+    walletClient?.chain?.id ?? undefined,
+    walletClient?.transport?.provider
+  );
+  
+  const { balance: tokenOutBalance } = useBalance(
+    swapState.tokenOut?.address,
+    walletClient?.chain?.id ?? undefined,
+    walletClient?.transport?.provider
+  );
+  
+  // Restore local allPools and poolsLoading state
   const [allPools, setAllPools] = useState<any[]>([]);
   const [poolsLoading, setPoolsLoading] = useState(true);
 
-  // Fetch all pools from the new API endpoint in config
+  // Restore useEffect for fetching pools
   useEffect(() => {
     setPoolsLoading(true);
     fetch(GRAPHQL_ENDPOINTS.all)
@@ -348,16 +413,31 @@ export function SwapForm() {
       })
       .catch(() => setPoolsLoading(false));
   }, []);
-
-  // Debug: Log all fetched pools to the console whenever they change
   useEffect(() => {
     if (allPools.length > 0) {
       console.log('Fetched all pools:', allPools);
     }
   }, [allPools]);
-
   // Auto-select best pool when tokens are chosen and user is on any supported network
   useEffect(() => {
+    if (!walletClient) {
+      console.warn('walletClient not ready yet');
+      return;
+    }
+    const chainId = walletClient.chain?.id;
+
+    console.log('walletClient:', walletClient);
+    console.log('chainId:', chainId);
+
+    if (!walletClient || !chainId) {
+      setAutoSelectedPool(null);
+      setSelectedPoolKey(null);
+      setPoolKeyInput('');
+      updatePoolId('');
+      console.warn('No wallet client or chainId available. Please connect your wallet.');
+      return;
+    }
+
     if (
       swapState.tokenIn &&
       swapState.tokenOut &&
@@ -386,18 +466,11 @@ export function SwapForm() {
           return;
         }
 
-        // Fetch liquidity for each pool
-        const chainId = 1; // fallback to Ethereum mainnet
-        const getRpcUrlForChain = (chainId: number): string | undefined => {
-          const network = SUPPORTED_NETWORKS.find(n => n.id === chainId);
-          return network?.rpcUrl;
-        };
-        const rpcUrl = getRpcUrlForChain(chainId);
         const { generatePoolId, getPoolInfo } = await import('../../utils/stateViewUtils');
         const { convertPoolToPoolKey } = await import('../../utils/poolSelectionUtils');
 
-        // Use wallet provider for dynamic RPC
-        const provider = walletClient?.transport?.provider || (typeof window !== 'undefined' ? window.ethereum : undefined);
+        // Use walletClient as the viem client
+        const client = walletClient;
 
         const poolsWithLiquidity = await Promise.all(
           matchingPools.map(async (pool) => {
@@ -405,26 +478,46 @@ export function SwapForm() {
             const poolId = generatePoolId(poolKey);
             let liquidity = 0n;
             try {
-              if (!provider) throw new Error('No wallet provider available');
-              const info = await getPoolInfo(chainId, provider, poolId);
+              const info = await getPoolInfo(chainId, client, poolId);
               liquidity = BigInt(info.liquidity || '0');
             } catch {}
             return { pool, fee: typeof pool.feeTier === 'string' ? parseInt(pool.feeTier) : pool.feeTier, liquidity };
           })
         );
 
-        // Sort by liquidity descending only
-        poolsWithLiquidity.sort((a, b) => {
-          return b.liquidity > a.liquidity ? 1 : b.liquidity < a.liquidity ? -1 : 0;
+        // Sort by liquidity descending only (BigInt comparison)
+        poolsWithLiquidity.sort((a, b) => (b.liquidity > a.liquidity ? 1 : b.liquidity < a.liquidity ? -1 : 0));
+
+        // Only consider pools with non-zero liquidity and both tokens present
+        const MIN_TOKEN_AMOUNT = 1;
+        const usablePools = poolsWithLiquidity.filter(p => {
+          const pool = p.pool;
+          return (
+            BigInt(p.liquidity) > 0n &&
+            Number(pool.totalValueLockedToken0) > MIN_TOKEN_AMOUNT &&
+            Number(pool.totalValueLockedToken1) > MIN_TOKEN_AMOUNT
+          );
         });
 
-        const bestPool = poolsWithLiquidity[0]?.pool;
+        // Sort usable pools by liquidity descending
+        usablePools.sort((a, b) => (b.liquidity > a.liquidity ? 1 : b.liquidity < a.liquidity ? -1 : 0));
+
+        // Pick the most liquid usable pool
+        let bestPool = usablePools[0]?.pool;
+        console.log('Best pool:', bestPool);
+        // If none found, fall back to the most liquid pool overall
+        if (!bestPool && poolsWithLiquidity.length > 0) {
+          bestPool = poolsWithLiquidity[0].pool;
+        }
+
         if (bestPool) {
           const poolKey = convertPoolToPoolKey(bestPool);
           setAutoSelectedPool(bestPool);
           setSelectedPoolKey(poolKey);
           setPoolKeyInput(JSON.stringify(poolKey, null, 2));
           updatePoolId(JSON.stringify(poolKey));
+          console.log('Auto-selected pool:', bestPool);
+          console.log('Pool key:', JSON.stringify(poolKey, null, 2));
         } else {
           setAutoSelectedPool(null);
           setSelectedPoolKey(null);
@@ -433,7 +526,7 @@ export function SwapForm() {
         }
       })();
     }
-  }, [swapState.tokenIn, swapState.tokenOut, allPools, poolsLoading]);
+  }, [swapState.tokenIn, swapState.tokenOut, allPools, poolsLoading, walletClient]);
   
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
@@ -460,13 +553,15 @@ export function SwapForm() {
         
         // If we have pool info and a successful swap, add to deployed pools
         if (poolInfo && selectedPoolKey) {
+          const networkId = walletClient?.chain?.id ?? 1;
+          const networkName = walletClient?.chain?.name ?? 'Ethereum';
           const newPool = {
             poolId: JSON.stringify(selectedPoolKey),
             token0Symbol: poolInfo.token0Symbol,
             token1Symbol: poolInfo.token1Symbol,
             fee: poolInfo.fee,
-            networkId: 1,
-            networkName: 'Ethereum',
+            networkId,
+            networkName,
             timestamp: Date.now()
           };
           addDeployedPool(JSON.stringify(newPool));
@@ -475,7 +570,21 @@ export function SwapForm() {
       }
     } catch (error: any) {
       console.error('Swap execution error:', error);
-      setError(error.message || 'Swap failed');
+      
+      // Check if it's a user rejection error
+      const errorMessage = error.message || error.toString();
+      if (
+        errorMessage.includes('User denied') ||
+        errorMessage.includes('User rejected') ||
+        errorMessage.includes('User cancelled') ||
+        errorMessage.includes('MetaMask Tx Signature: User denied') ||
+        errorMessage.includes('user rejected') ||
+        errorMessage.includes('user cancelled')
+      ) {
+        setError('User rejected the transaction');
+      } else {
+        setError(errorMessage || 'Swap failed');
+      }
     }
   }
   
@@ -525,13 +634,15 @@ export function SwapForm() {
     updateTokenOut(pool.token1);
 
     // Add to deployed pools
+    const networkId = walletClient?.chain?.id ?? 1;
+    const networkName = walletClient?.chain?.name ?? 'Ethereum';
     const newPool = {
       poolId,
       token0Symbol: pool.token0.symbol,
       token1Symbol: pool.token1.symbol,
       fee: pool.fee,
-      networkId: 1,
-      networkName: 'Ethereum',
+      networkId,
+      networkName,
       timestamp: Date.now()
     };
     addDeployedPool(JSON.stringify(newPool));
@@ -575,11 +686,8 @@ export function SwapForm() {
         <SwapContainer>
           <SwapHeader>
             <SwapTabs>
-              <SwapTab $active={sellMode} onClick={() => setSellMode(true)}>
-                Sell
-              </SwapTab>
-              <SwapTab $active={!sellMode} onClick={() => setSellMode(false)}>
-                Buy
+              <SwapTab $active={activeTab === 'swap'} onClick={() => setActiveTab('swap')}>
+                Swap
               </SwapTab>
             </SwapTabs>
             <SwapSettings
@@ -670,7 +778,9 @@ export function SwapForm() {
           {/* Input (From) section */}
           <InputContainer>
             <InputHeader>
-              {sellMode ? 'You sell' : 'You pay'}
+              {activeTab === 'swap' ? (sellMode ? 'You sell' : 'You pay') : 
+               activeTab === 'limit' ? 'From' :
+               activeTab === 'buy' ? 'You pay' : 'You sell'}
             </InputHeader>
             <InputRow>
               <AmountInput
@@ -679,14 +789,16 @@ export function SwapForm() {
                 onChange={(e) => updateAmountIn(e.target.value)}
               />
               <TokenSelector
-                label="Select token"
                 token={swapState.tokenIn}
                 onChange={updateTokenIn}
                 error={validation.tokenInError}
-                provider={walletClient?.transport?.provider || (typeof window !== 'undefined' ? window.ethereum : undefined)}
               />
             </InputRow>
-            {swapState.tokenIn && <USDValue>$0.00</USDValue>}
+            {swapState.tokenIn && tokenInBalance && parseFloat(tokenInBalance) > 0 && (
+              <TokenBalance>
+                {tokenInBalance} {swapState.tokenIn.symbol}
+              </TokenBalance>
+            )}
           </InputContainer>
           
           {/* Swap direction button */}
@@ -699,7 +811,9 @@ export function SwapForm() {
           {/* Output (To) section */}
           <InputContainer>
             <InputHeader>
-              {sellMode ? 'You buy' : 'You receive'}
+              {activeTab === 'swap' ? (sellMode ? 'You buy' : 'You receive') : 
+               activeTab === 'limit' ? 'To' :
+               activeTab === 'buy' ? 'You receive' : 'You buy'}
             </InputHeader>
             <InputRow>
               <AmountInput
@@ -708,25 +822,31 @@ export function SwapForm() {
                 readOnly
               />
               <TokenSelector
-                label="Select token"
                 token={swapState.tokenOut}
                 onChange={updateTokenOut}
                 error={validation.tokenOutError}
-                provider={walletClient?.transport?.provider || (typeof window !== 'undefined' ? window.ethereum : undefined)}
               />
             </InputRow>
-            {swapState.tokenOut && <USDValue>$0.00</USDValue>}
+            {swapState.tokenOut && tokenOutBalance && parseFloat(tokenOutBalance) > 0 && (
+              <TokenBalance>
+                {tokenOutBalance} {swapState.tokenOut.symbol}
+              </TokenBalance>
+            )}
           </InputContainer>
-          
-          {/* Swap button (always visible, disabled if not ready) */}
-          <ActionButton
-            onClick={handleSwapButtonClick}
-            $disabled={isButtonDisabled()}
-            disabled={isButtonDisabled()}
-          >
-            Swap
-          </ActionButton>
-          
+
+          {isConnected ? (
+            <ActionButton
+              onClick={handleSwapButtonClick}
+              $disabled={isButtonDisabled()}
+              disabled={isButtonDisabled()}
+            >
+              Swap
+            </ActionButton>
+          ) : (
+            <ConnectWalletButton onClick={openConnectModal}>
+              Connect Wallet
+            </ConnectWalletButton>
+          )}
           {error && <ErrorMessage>{error}</ErrorMessage>}
           {successMessage && <SuccessMessage>{successMessage}</SuccessMessage>}
         </SwapContainer>

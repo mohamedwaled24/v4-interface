@@ -46,7 +46,8 @@ const AppWrapper = styled.div`
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background-color: ${({ theme }) => theme.colors.background};
+  min-width: 100%;
+  background: linear-gradient(135deg, #f3eeff 0%, #fefdfe 100%);
   color: ${({ theme }) => theme.textPrimary};
 `
 
@@ -83,7 +84,7 @@ const PlaceholderText = styled.p`
 `
 
 export function App() {
-  const [activeNav, setActiveNav] = useState<NavType>(NavType.TRADE)
+  const [activeNav, setActiveNav] = useState<NavType>(NavType.Swap)
   
   return (
     <WalletProvider>
@@ -97,10 +98,7 @@ export function App() {
           <AppWrapper>
             <Header activeNav={activeNav} onNavChange={setActiveNav} />
             <ContentWrapper>
-              {activeNav === NavType.TRADE && <SwapForm />}
-              {activeNav === NavType.POOL && <CreatePoolForm />}
-              {activeNav === NavType.EXPLORE && <Analytics />}
-              {activeNav === NavType.BSC_POOLS && <BSCPoolsDemo />}
+              {activeNav === NavType.Swap && <SwapForm />}
             </ContentWrapper>
           </AppWrapper>
         </ThemeProvider>

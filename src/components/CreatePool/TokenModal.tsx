@@ -34,9 +34,8 @@ const ModalContent = styled.div`
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
   box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.2);
-  background-color: #191B1F;
+  background-color:#FFFFFF;
 `
 
 const ModalHeader = styled.div`
@@ -44,29 +43,24 @@ const ModalHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
 `
 
 const ModalTitle = styled.h3`
   margin: 0;
-  font-size: 16px;
-  font-weight: 500;
-  color: ${({ theme }) => theme.colors.neutral1};
+  font-size: 18px;
+  font-weight: 700;
+  color: #131313;
 `
 
 const CloseButton = styled.button`
   background: none;
   border: none;
   cursor: pointer;
-  color: ${({ theme }) => theme.colors.neutral2};
+  color: #131313;
   padding: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  
-  &:hover {
-    color: ${({ theme }) => theme.colors.neutral1};
-  }
 `
 
 const SearchContainer = styled.div`
@@ -78,18 +72,16 @@ const SearchInput = styled.input`
   width: 100%;
   padding: 12px 16px 12px 40px;
   border-radius: 12px;
-  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
-  background: ${({ theme }) => theme.colors.backgroundModule};
-  color: ${({ theme }) => theme.colors.neutral1};
+  background-color: #F9F9F9;
   font-size: 16px;
-  
+  outline: none;
+  border: none;
   &:focus {
     outline: none;
-    border-color: ${({ theme }) => theme.colors.accentAction};
   }
   
   &::placeholder {
-    color: ${({ theme }) => theme.colors.neutral3};
+    color: #999;
   }
 `
 
@@ -104,11 +96,11 @@ const SearchIcon = styled(Search)`
 
 const SectionHeader = styled.div`
   padding: 8px 20px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
-  color: ${({ theme }) => theme.colors.neutral2};
-  border-bottom: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
-  background-color: #191B1F;
+  color: #131313;
+  border-bottom: 1px solid #E0E0E0;
+  font-weight: 500;
 `
 
 const CommonTokensContainer = styled.div`
@@ -116,23 +108,21 @@ const CommonTokensContainer = styled.div`
   flex-wrap: wrap;
   gap: 8px;
   padding: 16px 20px;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
-  background-color: #191B1F;
 `
 
 const CommonTokenButton = styled.button`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: ${({ theme }) => theme.colors.backgroundModule};
-  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
   border-radius: 16px;
   padding: 8px 12px;
   cursor: pointer;
   transition: background-color 0.2s;
-  
+  border: none;
+  outline: none;
+  background-color: #F9F9F9;
   &:hover {
-    background: ${({ theme }) => theme.colors.backgroundInteractive};
+    background: #f9f9f9;
   }
 `
 
@@ -146,7 +136,6 @@ const CommonTokenLogo = styled.img`
 const CommonTokenSymbol = styled.span`
   font-size: 16px;
   font-weight: 500;
-  color: ${({ theme }) => theme.colors.neutral1};
 `
 
 const TokenList = styled.div`
@@ -154,7 +143,6 @@ const TokenList = styled.div`
   overflow-y: auto;
   padding: 0;
   max-height: 300px;
-  background-color: #191B1F;
 `
 
 const TokenItem = styled.div`
@@ -162,11 +150,8 @@ const TokenItem = styled.div`
   align-items: center;
   padding: 16px 20px;
   cursor: pointer;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
-  background-color: #191B1F;
-  
   &:hover {
-    background: ${({ theme }) => theme.colors.backgroundInteractive};
+    background: #f9f9f9;
   }
 `
 
@@ -174,7 +159,6 @@ const TokenLogo = styled.img`
   width: 36px;
   height: 36px;
   border-radius: 18px;
-  background: ${({ theme }) => theme.colors.backgroundInteractive};
   object-fit: contain;
 `
 
@@ -182,11 +166,9 @@ const TokenLogoFallback = styled.div`
   width: 36px;
   height: 36px;
   border-radius: 18px;
-  background: ${({ theme }) => theme.colors.backgroundInteractive};
   display: flex;
   align-items: center;
   justify-content: center;
-  color: ${({ theme }) => theme.colors.neutral2};
   font-size: 16px;
 `
 
@@ -195,16 +177,15 @@ const TokenDetails = styled.div`
   flex-direction: column;
   margin-left: 12px;
   flex: 1;
+  color: #131313;
 `
 
 const TokenSymbol = styled.span`
-  color: ${({ theme }) => theme.colors.neutral1};
   font-size: 16px;
   font-weight: 500;
 `
 
 const TokenName = styled.span`
-  color: ${({ theme }) => theme.colors.neutral2};
   font-size: 14px;
 `
 

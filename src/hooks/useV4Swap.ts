@@ -400,7 +400,21 @@ export function useV4Swap() {
 
     } catch (error: any) {
       console.error('Swap execution error:', error);
-      return { success: false, error: error.message };
+      
+      // Check if it's a user rejection error
+      const errorMessage = error.message || error.toString();
+      if (
+        errorMessage.includes('User denied') ||
+        errorMessage.includes('User rejected') ||
+        errorMessage.includes('User cancelled') ||
+        errorMessage.includes('MetaMask Tx Signature: User denied') ||
+        errorMessage.includes('user rejected') ||
+        errorMessage.includes('user cancelled')
+      ) {
+        return { success: false, error: 'User rejected the transaction' };
+      } else {
+        return { success: false, error: errorMessage };
+      }
     }
   };
 

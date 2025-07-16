@@ -51,7 +51,11 @@ export function useBalance(tokenAddress?: string, chainId?: number, provider?: a
         let providerChainId = provider && provider.chainId ? provider.chainId : 'n/a';
         console.log('[useBalance] chainId:', chainId, '| provider:', providerInfo, '| provider.chainId:', providerChainId, '| tokenAddress:', cleanTokenAddress, '| userAddress:', address);
         // Handle native ETH
-        if (!cleanTokenAddress || cleanTokenAddress === '0x0000000000000000000000000000000000000000') {
+        if (
+          !cleanTokenAddress ||
+          cleanTokenAddress === '0x0000000000000000000000000000000000000000' ||
+          cleanTokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+        ) {
           console.log('[useBalance] Fetching native balance for', address, 'on chain', chainId);
           const balance = await publicClient.getBalance({
             address: address as `0x${string}`

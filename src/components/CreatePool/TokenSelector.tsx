@@ -3,11 +3,11 @@ import styled from 'styled-components'
 import { Token } from '../../types'
 import { useBalance } from '../../hooks/useBalance'
 import { TokenModal } from './TokenModal'
-import { useWalletContext } from '../../contexts/WalletContext'
 import { useWalletClient } from 'wagmi';
+import { ArrowDown } from '../shared/icons';
 
 interface Props {
-  label: string
+  label?: string
   token: Token | null
   onChange: (token: Token | null) => void
   error?: string
@@ -27,76 +27,84 @@ const Label = styled.label`
 
 const InputContainer = styled.div<{ $error?: boolean }>`
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  background: ${({ theme }) => theme.colors.backgroundModule};
-  border: 1px solid ${({ theme, $error }) =>
-    $error ? theme.colors.accentCritical : theme.colors.backgroundOutline};
-  border-radius: 20px;
-  transition: border-color ${({ theme }) => theme.transition.duration.fast} ease;
+  align-items: stretch;
+  flex-basis: auto;
+  box-sizing: border-box;
+  position: relative;
+  min-height: 0px;
+  min-width: 0px;
+  flex-shrink: 0;
+  flex-direction: column;
   cursor: pointer;
-  min-width: 140px;
-  width: 100%;
-  max-width: 220px;
+  outline-color: rgba(0, 0, 0, 0);
+  background-image: linear-gradient(25deg, #741ff5, #e348ff);
+  border-radius: 999999px;
+  border-color: rgb(242, 242, 242);
+  border-width: 1px;
+  border-style: solid;
+  box-shadow: rgba(34, 34, 34, 0.04) 0px 0px 10px;
+  transform: scale(1);
+  opacity: 1;
+  padding: 3px 8px;
+  gap: 4px;
+  width: fit-content;
+  max-width: 140px;
+  transition: all 0.2s cubic-bezier(0.77, 0, 0.175, 1);
 
   &:hover {
-    border-color: ${({ theme, $error }) =>
-      $error ? theme.colors.accentCritical : theme.colors.neutral3};
-    background: ${({ theme }) => theme.colors.backgroundInteractive};
+    transform: scale(1.04);
   }
 `
 
 const TokenPlaceholder = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: ${({ theme }) => theme.colors.neutral2};
-  font-size: 20px;
-  margin:8px;
-  min-width: 110px;
+  justify-content: center;
+  gap: 4px;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
   white-space: nowrap;
+  padding: 0px 12px;
+  height: 36px;
 `
 
 const TokenInfo = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 4px;
   width: 100%;
+  color: white;
 `
 
 const TokenLogo = styled.div`
-  width: 36px;
-  height: 36px;
-  border-radius: 18px;
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
   background: ${({ theme }) => theme.colors.backgroundInteractive};
   display: flex;
   align-items: center;
   justify-content: center;
   color: ${({ theme }) => theme.colors.neutral2};
-  font-size: 16px;
+  font-size: 14px;
+  flex-shrink: 0;
 `
 
 const TokenDetails = styled.div`
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  flex: 1;
 `
 
 const TokenSymbol = styled.span`
-  color: ${({ theme }) => theme.colors.neutral1};
-  font-size: 20px;
+  color: white;
+  font-size: 13px;
   font-weight: 500;
-`
-
-const TokenName = styled.span`
-  color: ${({ theme }) => theme.colors.neutral2};
-  font-size: 14px;
-`
-
-const TokenBalance = styled.div`
-  color: ${({ theme }) => theme.colors.neutral2};
-  font-size: 16px;
-  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `
 
 const ErrorMessage = styled.div`
@@ -105,13 +113,9 @@ const ErrorMessage = styled.div`
   margin-top: 4px;
 `
 
-
-
 export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }) => {
   const { data: walletClient } = useWalletClient();
   const chainId = walletClient?.chain?.id;
-  console.log('TokenSelector chainId from walletClient:', chainId);
-  // Always use walletClient's provider for reads
   const provider = walletClient?.transport?.provider;
   // Only fetch balance if token address is available
   const { balance } = useBalance(
@@ -140,7 +144,7 @@ export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }
 
   return (
     <Container>
-      <Label>{label}</Label>
+      {label && <Label>{label}</Label>}
       <InputContainer $error={!!error} onClick={handleOpenModal}>
         {token ? (
           <TokenInfo>
@@ -148,21 +152,21 @@ export const TokenSelector: React.FC<Props> = ({ label, token, onChange, error }
               <img 
                 src={token.logoURI} 
                 alt={token.symbol} 
-                style={{ width: '36px', height: '36px', borderRadius: '18px' }} 
+                style={{ width: '28px', height: '28px', borderRadius: '14px' }} 
               />
             ) : (
               <TokenLogo>{token.symbol[0]}</TokenLogo>
             )}
             <TokenDetails>
               <TokenSymbol>{token.symbol}</TokenSymbol>
-              <TokenName>{token.name}</TokenName>
             </TokenDetails>
-            {balance && <TokenBalance>{balance} {token.symbol}</TokenBalance>}
           </TokenInfo>
         ) : (
           <TokenPlaceholder>
-            <TokenLogo>?</TokenLogo>
             Select token
+            <span style={{ marginLeft: 1, display: 'inline-flex', verticalAlign: 'middle' , fontWeight:'bold' }}>
+              <ArrowDown width={14} height={14} />
+            </span>
           </TokenPlaceholder>
         )}
       </InputContainer>

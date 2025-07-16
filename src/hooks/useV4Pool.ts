@@ -135,9 +135,26 @@ export function useV4Pool() {
       }
     } catch (error: any) {
       console.error('Error creating pool:', error)
-      return {
-        success: false,
-        error: error.message || 'Failed to create pool',
+      
+      // Check if it's a user rejection error
+      const errorMessage = error.message || error.toString();
+      if (
+        errorMessage.includes('User denied') ||
+        errorMessage.includes('User rejected') ||
+        errorMessage.includes('User cancelled') ||
+        errorMessage.includes('MetaMask Tx Signature: User denied') ||
+        errorMessage.includes('user rejected') ||
+        errorMessage.includes('user cancelled')
+      ) {
+        return {
+          success: false,
+          error: 'User rejected the transaction',
+        }
+      } else {
+        return {
+          success: false,
+          error: errorMessage || 'Failed to create pool',
+        }
       }
     } finally {
       setIsCreating(false)

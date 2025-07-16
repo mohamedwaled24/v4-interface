@@ -95,19 +95,15 @@ export const generatePositionId = (poolId: `0x${string}`, positionInfo: Position
  * @param provider Wallet provider (e.g., window.ethereum)
  * @returns StateView contract instance
  */
-export const getStateViewContract = (chainId: number, provider: any) => {
+export const getStateViewContract = (chainId: number, client: any) => {
   if (!CONTRACTS[chainId as keyof typeof CONTRACTS]) {
     throw new Error(`Unsupported chain ID: ${chainId}`);
   }
 
-  const publicClient = createPublicClient({
-    transport: custom(provider)
-  });
-
   return getContract({
     address: CONTRACTS[chainId as keyof typeof CONTRACTS].StateView as `0x${string}`,
     abi: stateViewABI,
-    client: publicClient
+    client // <-- pass walletClient directly
   });
 };
 
@@ -118,9 +114,9 @@ export const getStateViewContract = (chainId: number, provider: any) => {
  * @param poolId Pool ID
  * @returns Pool information with existence and initialization status
  */
-export const getPoolInfo = async (chainId: number, provider: any, poolId: `0x${string}`): Promise<PoolInfoResult> => {
+export const getPoolInfo = async (chainId: number, client: any, poolId: `0x${string}`): Promise<PoolInfoResult> => {
   try {
-    const stateView = getStateViewContract(chainId, provider);
+    const stateView = getStateViewContract(chainId, client);
     
     console.log(`Checking pool info for ID: ${poolId}`);
     
