@@ -364,6 +364,8 @@ export function SwapForm() {
   const [selectedPoolKey, setSelectedPoolKey] = useState<PoolKey | null>(null);
   const [poolKeyInput, setPoolKeyInput] = useState<string>('');
   const [autoSelectedPool, setAutoSelectedPool] = useState<any>(null);
+  // Add a state to control hover for the input container
+  const [inputHover, setInputHover] = useState(false);
 
   const { isConnected, address } = useAccount();
   const { openConnectModal } = useConnectModal()
@@ -776,12 +778,53 @@ export function SwapForm() {
           </div>
           
           {/* Input (From) section */}
-          <InputContainer>
+          <InputContainer
+            onMouseEnter={() => setInputHover(true)}
+            onMouseLeave={() => setInputHover(false)}
+          >
             <InputHeader>
               {activeTab === 'swap' ? (sellMode ? 'You sell' : 'You pay') : 
                activeTab === 'limit' ? 'From' :
                activeTab === 'buy' ? 'You pay' : 'You sell'}
             </InputHeader>
+            {/* Quick-select percentage buttons, right-aligned, only on hover */}
+            {swapState.tokenIn && tokenInBalance && parseFloat(tokenInBalance) > 0 && inputHover && (
+              <div style={{
+                display: 'flex',
+                gap: '6px',
+                marginBottom: '4px',
+                justifyContent: 'flex-end',
+                position: 'relative',
+                zIndex: 2,
+              }}>
+                {[25, 50, 75, 'MAX'].map(label => (
+                  <button
+                    key={label}
+                    style={{
+                      padding: '2px 7px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: 'rgba(255,255,255,0.7)',
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                      fontSize: 11,
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+                      transition: 'background 0.2s',
+                    }}
+                    onClick={() => {
+                      let amount = '';
+                      const balance = parseFloat(tokenInBalance);
+                      if (label === 'MAX') amount = balance.toString();
+                      else amount = (balance * (label as number) / 100).toString();
+                      updateAmountIn(amount);
+                    }}
+                    type="button"
+                  >
+                    {label}{label !== 'MAX' ? '%' : ''}
+                  </button>
+                ))}
+              </div>
+            )}
             <InputRow>
               <AmountInput
                 placeholder="0"
