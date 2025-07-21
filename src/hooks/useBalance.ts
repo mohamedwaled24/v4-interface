@@ -49,7 +49,7 @@ export function useBalance(tokenAddress?: string, chainId?: number, provider?: a
       try {
         let providerInfo = provider ? provider.constructor?.name : 'undefined';
         let providerChainId = provider && provider.chainId ? provider.chainId : 'n/a';
-        console.log('[useBalance] chainId:', chainId, '| provider:', providerInfo, '| provider.chainId:', providerChainId, '| tokenAddress:', cleanTokenAddress, '| userAddress:', address);
+       // console.log('[useBalance] chainId:', chainId, '| provider:', providerInfo, '| provider.chainId:', providerChainId, '| tokenAddress:', cleanTokenAddress, '| userAddress:', address);
         // Handle native ETH
         if (
           !cleanTokenAddress ||
@@ -65,7 +65,7 @@ export function useBalance(tokenAddress?: string, chainId?: number, provider?: a
         }
 
         // Handle ERC20 tokens
-        console.log('[useBalance] Fetching ERC20 balance for', cleanTokenAddress, 'for user', address, 'on chain', chainId);
+       // console.log('[useBalance] Fetching ERC20 balance for', cleanTokenAddress, 'for user', address, 'on chain', chainId);
         const [balanceResult, decimalsResult] = await Promise.all([
           publicClient.readContract({
             address: cleanTokenAddress as `0x${string}`,

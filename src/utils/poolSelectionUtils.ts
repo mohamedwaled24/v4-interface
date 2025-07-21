@@ -3,6 +3,21 @@ import { PoolKey } from '../hooks/useV4Swap';
 import { generatePoolId, getPoolInfo } from './stateViewUtils';
 
 /**
+ * Normalize token address - convert any native token address to 0x0000...0000
+ */
+const normalizeTokenAddress = (tokenAddress: string): string => {
+  const isNativeToken = (tokenAddress: string): boolean => {
+    return tokenAddress === '0x0000000000000000000000000000000000000000' ||
+           tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+  };
+  
+  if (isNativeToken(tokenAddress)) {
+    return '0x0000000000000000000000000000000000000000';
+  }
+  return tokenAddress;
+};
+
+/**
  * Fee tiers in order of preference (lower fees preferred)
  */
 export const FEE_TIERS = [
@@ -28,8 +43,8 @@ export async function findBestPoolByLiquidity(
   chainId: number,
   rpcUrl: string
 ): Promise<any | null> {
-  const token0 = token0Address.toLowerCase();
-  const token1 = token1Address.toLowerCase();
+  const token0 = normalizeTokenAddress(token0Address).toLowerCase();
+  const token1 = normalizeTokenAddress(token1Address).toLowerCase();
 
   // Find all pools that match the token pair (in both directions)
   const matchingPools = pools.filter(pool => {
@@ -79,8 +94,8 @@ export function findBestPool(
   token1Address: string
 ): BSCPool | null {
   // Normalize addresses for comparison
-  const token0 = token0Address.toLowerCase();
-  const token1 = token1Address.toLowerCase();
+  const token0 = normalizeTokenAddress(token0Address).toLowerCase();
+  const token1 = normalizeTokenAddress(token1Address).toLowerCase();
 
   // Find all pools that match the token pair (in both directions)
   const matchingPools = pools.filter(pool => {
@@ -211,8 +226,8 @@ export function getAvailablePools(
   token0Address: string,
   token1Address: string
 ): Array<BSCPool & { displayInfo: ReturnType<typeof getPoolDisplayInfo> }> {
-  const token0 = token0Address.toLowerCase();
-  const token1 = token1Address.toLowerCase();
+  const token0 = normalizeTokenAddress(token0Address).toLowerCase();
+  const token1 = normalizeTokenAddress(token1Address).toLowerCase();
 
   const matchingPools = pools.filter(pool => {
     const poolToken0 = pool.currency0.toLowerCase();

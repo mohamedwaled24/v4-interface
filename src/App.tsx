@@ -30,6 +30,26 @@ import {
   QueryClientProvider,
   QueryClient,
 } from "@tanstack/react-query";
+import { useEffect } from 'react';
+import { useNetworkStore } from './state/networkStore';
+
+function useHandleChainChangedNoReload() {
+  const setChainId = useNetworkStore((state) => state.setChainId);
+  useEffect(() => {
+    if (window.ethereum) {
+      // Remove all existing chainChanged listeners (including reloads)
+      window.ethereum.removeAllListeners?.('chainChanged');
+      // Add our own handler
+      const handler = (chainIdHex: string) => {
+        const chainId = parseInt(chainIdHex, 16);
+        setChainId(chainId);
+        // Optionally: refetch data, reset contracts, etc.
+      };
+      window.ethereum.on('chainChanged', handler);
+      return () => window.ethereum.removeListener('chainChanged', handler);
+    }
+  }, [setChainId]);
+}
 
 const config = getDefaultConfig({
   appName: 'My RainbowKit App',
@@ -83,6 +103,7 @@ const PlaceholderText = styled.p`
 `
 
 export function App() {
+  useHandleChainChangedNoReload();
   const [activeNav, setActiveNav] = useState<NavType>(NavType.Swap)
   
   return (

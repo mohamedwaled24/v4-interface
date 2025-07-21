@@ -10,6 +10,7 @@ import { DeployedPoolsList, addDeployedPool } from './DeployedPoolsList'
 import { GRAPHQL_ENDPOINTS } from '../../config/graphql';
 import { SUPPORTED_NETWORKS } from '../../constants/networks';
 import { useBalance } from '../../hooks/useBalance'
+import { ALL_POOLS_QUERY } from '@/hooks/useAllPools'
 
 const Container = styled.div`
   display: flex;
@@ -410,7 +411,7 @@ export function SwapForm() {
     fetch(GRAPHQL_ENDPOINTS.all)
       .then(res => res.json())
       .then(data => {
-        setAllPools(data.Pool || []);
+        setAllPools(data.data?.Pool || []);
         setPoolsLoading(false);
       })
       .catch(() => setPoolsLoading(false));
@@ -450,13 +451,18 @@ export function SwapForm() {
         const tokenOutAddress = swapState.tokenOut?.address?.toLowerCase();
         if (!tokenInAddress || !tokenOutAddress) return;
 
+        // Normalize addresses for pool search
+        const { normalizeTokenAddress } = await import('../../hooks/useV4Swap');
+        const normalizedTokenInAddress = normalizeTokenAddress(tokenInAddress).toLowerCase();
+        const normalizedTokenOutAddress = normalizeTokenAddress(tokenOutAddress).toLowerCase();
+
         // Find all pools that match the token pair (parse after _)
         const matchingPools = allPools.filter(pool => {
           const poolToken0 = pool.token0.split('_')[1]?.toLowerCase();
           const poolToken1 = pool.token1.split('_')[1]?.toLowerCase();
           return (
-            (poolToken0 === tokenInAddress && poolToken1 === tokenOutAddress) ||
-            (poolToken0 === tokenOutAddress && poolToken1 === tokenInAddress)
+            (poolToken0 === normalizedTokenInAddress && poolToken1 === normalizedTokenOutAddress) ||
+            (poolToken0 === normalizedTokenOutAddress && poolToken1 === normalizedTokenInAddress)
           );
         });
 
@@ -529,7 +535,8 @@ export function SwapForm() {
       })();
     }
   }, [swapState.tokenIn, swapState.tokenOut, allPools, poolsLoading, walletClient]);
-  
+  // console.log(swapState.tokenIn)
+  // console.log(swapState.tokenOut)
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
       return;
@@ -634,7 +641,7 @@ export function SwapForm() {
     updatePoolId(poolId);
     updateTokenIn(pool.token0);
     updateTokenOut(pool.token1);
-
+    console.log(pool.token0)
     // Add to deployed pools
     const networkId = walletClient?.chain?.id ?? 1;
     const networkName = walletClient?.chain?.name ?? 'Ethereum';

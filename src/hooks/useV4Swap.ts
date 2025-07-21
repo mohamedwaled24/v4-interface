@@ -71,6 +71,19 @@ const PERMIT2_DOMAIN = {
   verifyingContract: PERMIT2_ADDRESS as `0x${string}`
 };
 
+// Export utility functions that can be imported directly
+export const isNativeToken = (tokenAddress: string): boolean => {
+  return tokenAddress === '0x0000000000000000000000000000000000000000' ||
+         tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+};
+
+export const normalizeTokenAddress = (tokenAddress: string): string => {
+  if (isNativeToken(tokenAddress)) {
+    return '0x0000000000000000000000000000000000000000';
+  }
+  return tokenAddress;
+};
+
 const PERMIT2_BATCH_TYPES = {
   PermitBatch: [
     { name: 'details', type: 'PermitDetails[]' },
@@ -92,27 +105,17 @@ export function useV4Swap() {
   // Prefer walletClient.chain.id, fallback to publicClient.chain.id, fallback to 1 (mainnet)
   const chainId = walletClient?.chain.id || publicClient?.chain?.id || 1;
 
-  const getChainFromId = (chainId: number) => {
-    const network = SUPPORTED_NETWORKS.find(net => net.id === chainId);
-    if (!network) {
-      throw new Error(`Unsupported chain ID: ${chainId}`);
-    }
-    return network;
-  };
-
-  const isNativeToken = (tokenAddress: string): boolean => {
-    return tokenAddress === '0x0000000000000000000000000000000000000000' ||
-           tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
-  };
+  // Remove getChainFromId function entirely since we're using walletClient.chain directly
 
   const approveTokenToPermit2 = async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
-    if (!walletClient || !publicClient || isNativeToken(tokenAddress)) {
+    const normalizedAddress = normalizeTokenAddress(tokenAddress);
+    if (!walletClient || !publicClient || isNativeToken(normalizedAddress)) {
       return { success: true };
     }
 
     try {
       const currentAllowance = await publicClient.readContract({
-        address: tokenAddress as `0x${string}`,
+        address: normalizedAddress as `0x${string}`,
         abi: ERC20_ABI,
         functionName: 'allowance',
         args: [address as `0x${string}`, PERMIT2_ADDRESS as `0x${string}`]
@@ -129,10 +132,10 @@ export function useV4Swap() {
       });
 
       const hash = await walletClient.sendTransaction({
-        to: tokenAddress as `0x${string}`,
+        to: normalizedAddress as `0x${string}`,
         data,
         account: address as `0x${string}`,
-        chain: getChainFromId(chainId!),
+        chain: walletClient.chain!, // Use walletClient.chain directly
       });
 
       await publicClient.waitForTransactionReceipt({ hash });
@@ -143,7 +146,8 @@ export function useV4Swap() {
   };
 
   const checkPermit2Allowance = async (tokenAddress: string, spender: string): Promise<{ amount: bigint; expiration: number; nonce: number }> => {
-    if (!publicClient || !address || isNativeToken(tokenAddress)) {
+    const normalizedAddress = normalizeTokenAddress(tokenAddress);
+    if (!publicClient || !address || isNativeToken(normalizedAddress)) {
       return { amount: BigInt(0), expiration: 0, nonce: 0 };
     }
 
@@ -152,11 +156,11 @@ export function useV4Swap() {
         address: PERMIT2_ADDRESS as `0x${string}`,
         abi: permit2Abi.abi,
         functionName: 'allowance',
-        args: [address as `0x${string}`, tokenAddress as `0x${string}`, spender as `0x${string}`]
-      });
+        args: [address as `0x${string}`, normalizedAddress as `0x${string}`, spender as `0x${string}`]
+      }) as [bigint, bigint, bigint]; // Type the result properly
 
       return {
-        amount: result[0] as bigint,
+        amount: result[0],
         expiration: Number(result[1]),
         nonce: Number(result[2])
       };
@@ -290,8 +294,9 @@ export function useV4Swap() {
         return { success: false, error: 'Universal Router not available on this chain' };
       }
 
-      // Step 1: Explicitly set Permit2 approval for Universal Router (30 days expiration) for all non-native token swaps
-      if (!isNativeToken(tokenIn.address)) {
+      // Step 1: Skip Permit2 approval for native tokens, only approve ERC-20 tokens
+      const normalizedTokenInAddress = normalizeTokenAddress(tokenIn.address);
+      if (!isNativeToken(normalizedTokenInAddress)) {
         const permit2Expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30; // 30 days from now
         // Approve Permit2 for Universal Router with maxUint256 and 30 days expiration
         const approval = await approveTokenToPermit2(tokenIn.address, amountInWei);
@@ -304,27 +309,25 @@ export function useV4Swap() {
           abi: permit2Abi.abi,
           functionName: 'approve',
           args: [
-            tokenIn.address as `0x${string}`,
+            normalizedTokenInAddress as `0x${string}`,
             universalRouterAddress as `0x${string}`,
             amountInWei,
             BigInt(permit2Expiration)
           ],
           account: address as `0x${string}`,
-          chain: getChainFromId(chainId),
+          chain: walletClient.chain!, // Use walletClient.chain directly
         });
         await publicClient.waitForTransactionReceipt({ hash: permit2ApprovalTx });
       }
-
       // Step 2: Skip SDK Currency objects - we don't actually need them for V4Planner
       // The V4Planner works directly with addresses from the poolKey
-      
       // Step 3: Skip CurrencyAmount objects - not needed for direct V4Planner usage
 
       // Step 4: Create V4Planner with exact test pattern
       const v4Planner = new V4Planner();
       
       // Determine zeroForOne based on poolKey currencies (already ordered)
-      const zeroForOne = poolKey.currency0.toLowerCase() === tokenIn.address.toLowerCase();
+      const zeroForOne = poolKey.currency0.toLowerCase() === normalizedTokenInAddress.toLowerCase();
       
       // Add swap action - exact match to test pattern
       v4Planner.addAction(Actions.SWAP_EXACT_IN_SINGLE, [
@@ -369,12 +372,12 @@ export function useV4Swap() {
       
       // Step 8: Calculate ETH value for native token swaps
       let ethValue = BigInt(0);
-      if (isNativeToken(tokenIn.address)) {
+      if (isNativeToken(normalizedTokenInAddress)) {
         ethValue = amountInWei;
       }
 
       // Step 9: Execute the swap with proper 3-parameter structure
-      const hash = await walletClient.sendTransaction({
+      const transactionConfig: any = {
         to: universalRouterAddress as `0x${string}`,
         data: encodeFunctionData({
           abi: universalRouterAbi.abi,
@@ -383,8 +386,73 @@ export function useV4Swap() {
         }),
         value: ethValue,
         account: address as `0x${string}`,
-        chain: getChainFromId(chainId),
+        chain: walletClient.chain!, // Use walletClient.chain directly
+      };
+
+      // Fetch dynamic gas prices from the network
+      let dynamicGasFees = null;
+      try {
+        const feeData = await publicClient.getFeeHistory({
+          blockCount: 1,
+          rewardPercentiles: [25, 50, 75]
+        });
+        
+        if (feeData.baseFeePerGas && feeData.baseFeePerGas.length > 0 && 
+            feeData.reward && feeData.reward.length > 0) {
+          const baseFeePerGas = feeData.baseFeePerGas[0];
+          const medianPriorityFee = feeData.reward[0][1]; // 50th percentile
+          
+          // Calculate maxFeePerGas = baseFeePerGas + priorityFee
+          const maxFeePerGas = baseFeePerGas + medianPriorityFee;
+          
+          dynamicGasFees = {
+            maxFeePerGas,
+            maxPriorityFeePerGas: medianPriorityFee
+          };
+          
+          console.log('Dynamic gas fees:', {
+            baseFeePerGas: baseFeePerGas.toString(),
+            maxFeePerGas: maxFeePerGas.toString(),
+            maxPriorityFeePerGas: medianPriorityFee.toString()
+          });
+        }
+      } catch (error) {
+        console.log('Failed to fetch dynamic gas fees:', error);
+      }
+
+      // Apply dynamic gas fees if available
+      if (dynamicGasFees) {
+        transactionConfig.maxFeePerGas = dynamicGasFees.maxFeePerGas;
+        transactionConfig.maxPriorityFeePerGas = dynamicGasFees.maxPriorityFeePerGas;
+      }
+
+      // Log transaction details for debugging
+      console.log('Swap transaction config:', {
+        to: universalRouterAddress,
+        value: ethValue.toString(),
+        isNativeToken: isNativeToken(normalizedTokenInAddress),
+        amountIn: amountInWei.toString(),
+        amountOutMin: amountOutMinWei.toString(),
+        gasFees: dynamicGasFees ? {
+          maxFeePerGas: dynamicGasFees.maxFeePerGas.toString(),
+          maxPriorityFeePerGas: dynamicGasFees.maxPriorityFeePerGas.toString()
+        } : 'Using wallet defaults'
       });
+
+      // Estimate gas to see what's happening
+      try {
+        const gasEstimate = await publicClient.estimateGas({
+          account: address as `0x${string}`,
+          to: universalRouterAddress as `0x${string}`,
+          data: transactionConfig.data,
+          value: ethValue
+        });
+        console.log('Estimated gas:', gasEstimate.toString());
+      } catch (error) {
+        console.log('Gas estimation failed:', error);
+      }
+
+      const hash = await walletClient.sendTransaction(transactionConfig);
 
       // Wait for transaction receipt
       const receipt = await publicClient.waitForTransactionReceipt({ 
@@ -558,7 +626,6 @@ export function useV4Swap() {
     executeSwapDirect: executeSwap,
     
     // Utility functions
-    isNativeToken,
-    getChainFromId,
+    // Remove getChainFromId from return since we're not using it anymore
   };
 }
