@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { TokenSelector } from '../CreatePool/TokenSelector'
 import { SwapSettings } from './SwapSettings'
@@ -408,19 +408,40 @@ export function SwapForm() {
   // Restore useEffect for fetching pools
   useEffect(() => {
     setPoolsLoading(true);
-    fetch(GRAPHQL_ENDPOINTS.all)
+    fetch(GRAPHQL_ENDPOINTS.all,{
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({query: ALL_POOLS_QUERY.loc?.source.body})
+    })
       .then(res => res.json())
       .then(data => {
+        console.log('Raw pool fetch response:', data);
         setAllPools(data.data?.Pool || []);
         setPoolsLoading(false);
       })
       .catch(() => setPoolsLoading(false));
   }, []);
+  // Log all fetched pools whenever they change
   useEffect(() => {
     if (allPools.length > 0) {
-      console.log('Fetched all pools:', allPools);
+      console.log('=== Fetched Pools ===');
+      allPools.forEach((pool, idx) => {
+        console.log(`Pool #${idx + 1}:`, pool);
+      });
+      console.log('====================');
     }
   }, [allPools]);
+
+  // Log the selected pool key whenever it changes
+  useEffect(() => {
+    if (selectedPoolKey) {
+      console.log('=== Selected Pool Key ===');
+      console.log(selectedPoolKey);
+      console.log('========================');
+    }
+  }, [selectedPoolKey]);
   // Auto-select best pool when tokens are chosen and user is on any supported network
   useEffect(() => {
     if (!walletClient) {
