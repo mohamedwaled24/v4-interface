@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import styled from 'styled-components'
 import { useWalletContext } from '../../contexts/WalletContext'
-import { SUPPORTED_NETWORKS } from '../../constants/networks'
 import { toast } from 'react-toastify'
 
 const Container = styled.div`
@@ -93,81 +92,29 @@ export const NetworkDropdown: React.FC<NetworkDropdownProps> = ({ className }) =
   const [isChangingNetwork, setIsChangingNetwork] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false)
       }
     }
-    
     document.addEventListener('mousedown', handleClickOutside)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [])
-  
-  // Handle network switching
-  const handleNetworkSwitch = async (networkId: number) => {
-    if (networkId === chainId) {
-      setIsOpen(false)
-      return
-    }
-    
-    if (!isConnected) {
-      toast.warning('Please connect your wallet first')
-      setIsOpen(false)
-      return
-    }
-    
-    setIsChangingNetwork(true)
-    try {
-      console.log('Switching to network:', networkId)
-      await switchNetwork(networkId)
-      toast.success(`Switched to ${SUPPORTED_NETWORKS.find(n => n.id === networkId)?.name}`)
-      setIsOpen(false)
-    } catch (error) {
-      console.error('Failed to switch network:', error)
-      toast.error('Failed to switch network. Please try again.')
-    } finally {
-      setIsChangingNetwork(false)
-    }
-  }
-  
-  // Filter out networks that don't have all required fields
-  const availableNetworks = SUPPORTED_NETWORKS.filter(network => 
-    network && network.id && network.name
-  )
-  
+
+  // Only show the connected network
+  if (!isConnected || !network) return null
+
   return (
     <Container className={className} ref={dropdownRef}>
-      <NetworkButton 
-        onClick={() => setIsOpen(!isOpen)}
-        disabled={isChangingNetwork}
-      >
-        {network ? (
-          <>
-            <NetworkDot />
-            {network.name}
-          </>
-        ) : (
-          'Select Network'
-        )}
+      <NetworkButton onClick={() => setIsOpen(!isOpen)} disabled={isChangingNetwork}>
+        <NetworkDot />
+        {network.name || `Chain ${network.chainId}`}
         <ChevronIcon $isOpen={isOpen}>▾</ChevronIcon>
       </NetworkButton>
-      
-      <Dropdown $isOpen={isOpen}>
-        {availableNetworks.map((net) => (
-          <NetworkOption 
-            key={net.id} 
-            $active={chainId === net.id}
-            onClick={() => handleNetworkSwitch(net.id)}
-          >
-            <NetworkName>{net.name}</NetworkName>
-            {chainId === net.id && <ActiveIndicator />}
-          </NetworkOption>
-        ))}
-      </Dropdown>
+      {/* No dropdown list, only show current network */}
     </Container>
   )
 }

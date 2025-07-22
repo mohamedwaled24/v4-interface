@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
-import { SUPPORTED_NETWORKS } from '../../constants/networks'
 import { useWalletContext } from '../../contexts/WalletContext'
 import { toast } from 'react-toastify'
 
@@ -34,11 +33,10 @@ interface NetworkSelectorProps {
 }
 
 export const NetworkSelector: React.FC<NetworkSelectorProps> = ({ className }) => {
-  const { chainId, switchNetwork, isConnected } = useWalletContext()
-  const [selectedNetwork, setSelectedNetwork] = useState<number>(chainId || SUPPORTED_NETWORKS[0].id)
+  const { chainId, switchNetwork, isConnected, network } = useWalletContext()
+  const [selectedNetwork, setSelectedNetwork] = useState<number | null>(chainId)
   const [isChangingNetwork, setIsChangingNetwork] = useState(false)
 
-  // Update the selected network when chainId changes
   useEffect(() => {
     if (chainId) {
       setSelectedNetwork(chainId)
@@ -47,26 +45,19 @@ export const NetworkSelector: React.FC<NetworkSelectorProps> = ({ className }) =
 
   const handleNetworkChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const networkId = Number(e.target.value)
-    
     if (!isConnected) {
       toast.warning('Please connect your wallet first')
       return
     }
-    
     if (networkId === chainId) {
       return // Already on this network
     }
-
     setIsChangingNetwork(true)
-    
     try {
-      console.log('Switching to network:', networkId)
       await switchNetwork(networkId)
-      toast.success(`Switched to ${SUPPORTED_NETWORKS.find(n => n.id === networkId)?.name}`)
+      toast.success(`Switched to network ${networkId}`)
     } catch (error) {
-      console.error('Failed to switch network:', error)
       toast.error('Failed to switch network. Please try again.')
-      // Reset to current chainId if switch failed
       if (chainId) {
         setSelectedNetwork(chainId)
       }
@@ -75,23 +66,19 @@ export const NetworkSelector: React.FC<NetworkSelectorProps> = ({ className }) =
     }
   }
 
-  // Filter to only show supported networks
-  const availableNetworks = SUPPORTED_NETWORKS.filter(network => 
-    Object.keys(network).length > 0 && network.id
-  )
+  // Only show the connected network
+  if (!isConnected || !network) return null
 
   return (
     <Container className={className}>
       <Select
-        value={selectedNetwork}
+        value={selectedNetwork ?? ''}
         onChange={handleNetworkChange}
         disabled={isChangingNetwork || !isConnected}
       >
-        {availableNetworks.map((network) => (
-          <NetworkOption key={network.id} value={network.id}>
-            {network.name}
-          </NetworkOption>
-        ))}
+        <NetworkOption key={network.chainId} value={network.chainId}>
+          {network.name || `Chain ${network.chainId}`}
+        </NetworkOption>
       </Select>
     </Container>
   )

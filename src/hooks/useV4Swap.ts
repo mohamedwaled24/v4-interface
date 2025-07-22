@@ -328,7 +328,7 @@ export function useV4Swap() {
       
       // Determine zeroForOne based on poolKey currencies (already ordered)
       const zeroForOne = poolKey.currency0.toLowerCase() === normalizedTokenInAddress.toLowerCase();
-      
+      console.log(normalizedTokenInAddress, poolKey.currency0)
       // Add swap action - exact match to test pattern
       v4Planner.addAction(Actions.SWAP_EXACT_IN_SINGLE, [
         {
@@ -388,69 +388,30 @@ export function useV4Swap() {
         account: address as `0x${string}`,
         chain: walletClient.chain!, // Use walletClient.chain directly
       };
-
-      // Fetch dynamic gas prices from the network
-      let dynamicGasFees = null;
+      // Estimate gas to see what's happening
+      let gasEstimate;
       try {
-        const feeData = await publicClient.getFeeHistory({
-          blockCount: 1,
-          rewardPercentiles: [25, 50, 75]
+        gasEstimate = await publicClient.estimateGas({
+          account: address as `0x${string}`,
+          to: universalRouterAddress as `0x${string}`,
+          data: transactionConfig.data,
+          value: ethValue,
+          gas: 5000000n // Increased gas limit for estimation
         });
-        
-        if (feeData.baseFeePerGas && feeData.baseFeePerGas.length > 0 && 
-            feeData.reward && feeData.reward.length > 0) {
-          const baseFeePerGas = feeData.baseFeePerGas[0];
-          const medianPriorityFee = feeData.reward[0][1]; // 50th percentile
-          
-          // Calculate maxFeePerGas = baseFeePerGas + priorityFee
-          const maxFeePerGas = baseFeePerGas + medianPriorityFee;
-          
-          dynamicGasFees = {
-            maxFeePerGas,
-            maxPriorityFeePerGas: medianPriorityFee
-          };
-          
-          console.log('Dynamic gas fees:', {
-            baseFeePerGas: baseFeePerGas.toString(),
-            maxFeePerGas: maxFeePerGas.toString(),
-            maxPriorityFeePerGas: medianPriorityFee.toString()
-          });
-        }
+        console.log('Estimated gas:', gasEstimate.toString());
       } catch (error) {
-        console.log('Failed to fetch dynamic gas fees:', error);
+        console.log('Gas estimation failed:', error);
       }
-
-      // Apply dynamic gas fees if available
-      if (dynamicGasFees) {
-        transactionConfig.maxFeePerGas = dynamicGasFees.maxFeePerGas;
-        transactionConfig.maxPriorityFeePerGas = dynamicGasFees.maxPriorityFeePerGas;
-      }
-
-      // Log transaction details for debugging
+      // Only log the config, do not reference any gas fee properties
       console.log('Swap transaction config:', {
         to: universalRouterAddress,
         value: ethValue.toString(),
         isNativeToken: isNativeToken(normalizedTokenInAddress),
         amountIn: amountInWei.toString(),
         amountOutMin: amountOutMinWei.toString(),
-        gasFees: dynamicGasFees ? {
-          maxFeePerGas: dynamicGasFees.maxFeePerGas.toString(),
-          maxPriorityFeePerGas: dynamicGasFees.maxPriorityFeePerGas.toString()
-        } : 'Using wallet defaults'
+        gas: gasEstimate ? gasEstimate.toString() : 'not set',
+        gasFees: 'Using wallet/provider defaults'
       });
-
-      // Estimate gas to see what's happening
-      try {
-        const gasEstimate = await publicClient.estimateGas({
-          account: address as `0x${string}`,
-          to: universalRouterAddress as `0x${string}`,
-          data: transactionConfig.data,
-          value: ethValue
-        });
-        console.log('Estimated gas:', gasEstimate.toString());
-      } catch (error) {
-        console.log('Gas estimation failed:', error);
-      }
 
       const hash = await walletClient.sendTransaction(transactionConfig);
 

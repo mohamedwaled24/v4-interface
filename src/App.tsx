@@ -107,25 +107,25 @@ export function App() {
   const [activeNav, setActiveNav] = useState<NavType>(NavType.Swap)
   
   return (
-    <WalletProvider>
-        <WagmiProvider config={config}>
+    <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider>
-      <ApolloProvider client={client}>
-        <ThemeProvider theme={theme}>
-          <GlobalStyle />
-          <ToastContainer position="top-right" autoClose={5000} />
-          <AppWrapper>
-            <Header activeNav={activeNav} onNavChange={setActiveNav} />
-            <ContentWrapper>
-              {activeNav === NavType.Swap && <SwapForm />}
-            </ContentWrapper>
-          </AppWrapper>
-        </ThemeProvider>
-      </ApolloProvider>
-      </RainbowKitProvider>
+        <WalletProvider>
+          <RainbowKitProvider>
+            <ApolloProvider client={client}>
+              <ThemeProvider theme={theme}>
+                <GlobalStyle />
+                <ToastContainer position="top-right" autoClose={5000} />
+                <AppWrapper>
+                  <Header activeNav={activeNav} onNavChange={setActiveNav} />
+                  <ContentWrapper>
+                    {activeNav === NavType.Swap && <SwapForm />}
+                  </ContentWrapper>
+                </AppWrapper>
+              </ThemeProvider>
+            </ApolloProvider>
+          </RainbowKitProvider>
+        </WalletProvider>
       </QueryClientProvider>
     </WagmiProvider>
-    </WalletProvider>
   )
 }
