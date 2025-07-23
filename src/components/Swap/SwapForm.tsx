@@ -412,6 +412,7 @@ export function SwapForm() {
       .then(data => {
         setAllPools(data.Pool || []);
         setPoolsLoading(false);
+        console.log('fetched pools' , data)
       })
       .catch(() => setPoolsLoading(false));
   }, []);

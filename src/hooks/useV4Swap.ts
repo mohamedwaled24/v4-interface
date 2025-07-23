@@ -71,6 +71,18 @@ const PERMIT2_DOMAIN = {
   verifyingContract: PERMIT2_ADDRESS as `0x${string}`
 };
 
+export const isNativeToken = (tokenAddress: string): boolean => {
+  return tokenAddress === '0x0000000000000000000000000000000000000000' ||
+         tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+};
+
+export const normalizeTokenAddress = (tokenAddress: string): string => {
+  if (isNativeToken(tokenAddress)) {
+    return '0x0000000000000000000000000000000000000000';
+  }
+  return tokenAddress;
+};
+
 const PERMIT2_BATCH_TYPES = {
   PermitBatch: [
     { name: 'details', type: 'PermitDetails[]' },
@@ -100,19 +112,18 @@ export function useV4Swap() {
     return network;
   };
 
-  const isNativeToken = (tokenAddress: string): boolean => {
-    return tokenAddress === '0x0000000000000000000000000000000000000000' ||
-           tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
-  };
-
   const approveTokenToPermit2 = async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
+    const normalizedAddress = normalizeTokenAddress(tokenAddress);
+    if (!walletClient || !publicClient || isNativeToken(normalizedAddress)) {
+      return { success: true };
+    }
     if (!walletClient || !publicClient || isNativeToken(tokenAddress)) {
       return { success: true };
     }
 
     try {
       const currentAllowance = await publicClient.readContract({
-        address: tokenAddress as `0x${string}`,
+        address: normalizedAddress  as `0x${string}`,
         abi: ERC20_ABI,
         functionName: 'allowance',
         args: [address as `0x${string}`, PERMIT2_ADDRESS as `0x${string}`]
@@ -129,7 +140,7 @@ export function useV4Swap() {
       });
 
       const hash = await walletClient.sendTransaction({
-        to: tokenAddress as `0x${string}`,
+        to: normalizedAddress as `0x${string}`,
         data,
         account: address as `0x${string}`,
         chain: getChainFromId(chainId!),
@@ -143,6 +154,10 @@ export function useV4Swap() {
   };
 
   const checkPermit2Allowance = async (tokenAddress: string, spender: string): Promise<{ amount: bigint; expiration: number; nonce: number }> => {
+    const normalizedAddress = normalizeTokenAddress(tokenAddress);
+    if (!publicClient || !address || isNativeToken(normalizedAddress)) {
+      return { amount: BigInt(0), expiration: 0, nonce: 0 };
+    }
     if (!publicClient || !address || isNativeToken(tokenAddress)) {
       return { amount: BigInt(0), expiration: 0, nonce: 0 };
     }
@@ -152,7 +167,7 @@ export function useV4Swap() {
         address: PERMIT2_ADDRESS as `0x${string}`,
         abi: permit2Abi.abi,
         functionName: 'allowance',
-        args: [address as `0x${string}`, tokenAddress as `0x${string}`, spender as `0x${string}`]
+        args: [address as `0x${string}`, normalizedAddress  as `0x${string}`, spender as `0x${string}`]
       });
 
       return {
@@ -291,7 +306,8 @@ export function useV4Swap() {
       }
 
       // Step 1: Explicitly set Permit2 approval for Universal Router (30 days expiration) for all non-native token swaps
-      if (!isNativeToken(tokenIn.address)) {
+      const normalizedTokenInAddress = normalizeTokenAddress(tokenIn.address);
+      if (!isNativeToken(normalizedTokenInAddress)) {
         const permit2Expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30; // 30 days from now
         // Approve Permit2 for Universal Router with maxUint256 and 30 days expiration
         const approval = await approveTokenToPermit2(tokenIn.address, amountInWei);
@@ -304,13 +320,13 @@ export function useV4Swap() {
           abi: permit2Abi.abi,
           functionName: 'approve',
           args: [
-            tokenIn.address as `0x${string}`,
+            normalizedTokenInAddress as `0x${string}`,
             universalRouterAddress as `0x${string}`,
             amountInWei,
             BigInt(permit2Expiration)
           ],
           account: address as `0x${string}`,
-          chain: getChainFromId(chainId),
+          chain: walletClient.chain!, // Use walletClient.chain directly
         });
         await publicClient.waitForTransactionReceipt({ hash: permit2ApprovalTx });
       }
