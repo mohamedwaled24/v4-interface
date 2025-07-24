@@ -364,8 +364,12 @@ export function SwapForm() {
   const [selectedPoolKey, setSelectedPoolKey] = useState<PoolKey | null>(null);
   const [poolKeyInput, setPoolKeyInput] = useState<string>('');
   const [autoSelectedPool, setAutoSelectedPool] = useState<any>(null);
+  const [quote, setQuote] = useState<string | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   // Add a state to control hover for the input container
   const [inputHover, setInputHover] = useState(false);
+  const [ticks, setTicks] = useState<any[]>([]);
 
   const { isConnected, address } = useAccount();
   const { openConnectModal } = useConnectModal()
@@ -384,7 +388,8 @@ export function SwapForm() {
     updateDeadline,
     swapTokens,
     executeSwap,
-    validateSwap
+    validateSwap,
+    fetchQuote,
   } = useV4Swap()
   
   // Get balances for selected tokens
@@ -407,15 +412,60 @@ export function SwapForm() {
   // Restore useEffect for fetching pools
   useEffect(() => {
     setPoolsLoading(true);
-    fetch(GRAPHQL_ENDPOINTS.all)
+    fetch(GRAPHQL_ENDPOINTS.allPools,{
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: `
+          query Pool {
+    Pool {
+      id
+      chainId
+      name
+      createdAtTimestamp
+      createdAtBlockNumber
+      token0
+      token1
+      feeTier
+      liquidity
+      sqrtPrice
+      token0Price
+      token1Price
+      tick
+      tickSpacing
+      observationIndex
+      volumeToken0
+      volumeToken1
+      volumeUSD
+      untrackedVolumeUSD
+      feesUSD
+      feesUSDUntracked
+      txCount
+      collectedFeesToken0
+      collectedFeesToken1
+      collectedFeesUSD
+      totalValueLockedToken0
+      totalValueLockedToken1
+      totalValueLockedETH
+      totalValueLockedUSD
+      totalValueLockedUSDUntracked
+      liquidityProviderCount
+      hooks
+      db_write_timestamp
+  }
+  }`
+      })
+    })
       .then(res => res.json())
       .then(data => {
-        setAllPools(data.Pool || []);
+        setAllPools(data.data?.Pool || []);
         setPoolsLoading(false);
-        console.log('fetched pools' , data)
       })
       .catch(() => setPoolsLoading(false));
   }, []);
+  console.log('allPools', allPools);
   useEffect(() => {
     if (allPools.length > 0) {
       console.log('Fetched all pools:', allPools);
@@ -530,6 +580,83 @@ export function SwapForm() {
       })();
     }
   }, [swapState.tokenIn, swapState.tokenOut, allPools, poolsLoading, walletClient]);
+  
+  // Fetch ticks when selectedPoolKey changes
+  useEffect(() => {
+    async function fetchTicks() {
+      if (!selectedPoolKey) {
+        setTicks([]);
+        return;
+      }
+      try {
+        // Use the pool id string (you may need to adjust this depending on your subgraph schema)
+        const poolId = JSON.stringify(selectedPoolKey);
+        const res = await fetch(GRAPHQL_ENDPOINTS.allPools, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `
+              query PoolTicks($poolId: String!) {
+                ticks(where: { pool: $poolId }) {
+                  index
+                  liquidityNet
+                  liquidityGross
+                }
+              }
+            `,
+            variables: { poolId },
+          }),
+        });
+        const data = await res.json();
+        setTicks(data.data?.ticks || []);
+      } catch (e) {
+        setTicks([]);
+      }
+    }
+    fetchTicks();
+  }, [selectedPoolKey]);
+
+  // Fetch quote when input changes
+  useEffect(() => {
+    let cancelled = false;
+    async function getQuote() {
+      setQuote(null);
+      setQuoteError(null);
+      if (
+        swapState.tokenIn &&
+        swapState.tokenOut &&
+        swapState.amountIn &&
+        selectedPoolKey &&
+        ticks.length > 0 // Only fetch quote if ticks are available
+      ) {
+        setQuoteLoading(true);
+        try {
+          const result = await fetchQuote({
+            tokenIn: swapState.tokenIn,
+            tokenOut: swapState.tokenOut,
+            amountIn: swapState.amountIn,
+            poolKey: selectedPoolKey,
+            ticks, // Pass ticks to fetchQuote
+          });
+          if (!cancelled) {
+            setQuote(result);
+            setQuoteError(result === null ? 'No quote available for this amount/pool.' : null);
+            // if (result) updateAmountOut(result); // Auto-fill output field (removed, output is read-only)
+          }
+        } catch (e) {
+          if (!cancelled) setQuoteError('Failed to fetch quote.');
+        } finally {
+          if (!cancelled) setQuoteLoading(false);
+        }
+      } else {
+        setQuote(null);
+        setQuoteError(null);
+        // updateAmountOut(''); // Clear output field if no quote (removed)
+      }
+    }
+    getQuote();
+    return () => { cancelled = true; };
+  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, selectedPoolKey, ticks]);
   
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
@@ -871,6 +998,18 @@ export function SwapForm() {
                 error={validation.tokenOutError}
               />
             </InputRow>
+            {/* Show the quote below the output input */}
+            {quoteLoading && (
+              <USDValue>Loading quote...</USDValue>
+            )}
+            {quoteError && !quoteLoading && (
+              <USDValue style={{ color: 'orange' }}>{quoteError}</USDValue>
+            )}
+            {quote && !quoteLoading && !quoteError && (
+              <USDValue>
+                Estimated Output: {quote} {swapState.tokenOut?.symbol}
+              </USDValue>
+            )}
             {swapState.tokenOut && tokenOutBalance && parseFloat(tokenOutBalance) > 0 && (
               <TokenBalance>
                 {tokenOutBalance} {swapState.tokenOut.symbol}

@@ -3,7 +3,7 @@ import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
 import { parseUnits, keccak256, encodePacked, encodeAbiParameters, maxUint256, encodeFunctionData, getAddress } from 'viem'
 import { SUPPORTED_NETWORKS } from '../constants/networks'
 import { CONTRACTS } from '../constants/contracts'
-import { V4Planner, Actions } from '@uniswap/v4-sdk'
+import { V4Planner, Actions, Pool, TickListDataProvider } from '@uniswap/v4-sdk'
 import { Token as SDKToken, Currency, TradeType, Percent, CurrencyAmount } from '@uniswap/sdk-core'
 import universalRouterAbi from '../../contracts/universalRouter.json'
 import permit2Abi from '../../contracts/permit2.json'
@@ -111,6 +111,8 @@ export function useV4Swap() {
     }
     return network;
   };
+
+
 
   const approveTokenToPermit2 = async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
     const normalizedAddress = normalizeTokenAddress(tokenAddress);
@@ -434,6 +436,63 @@ export function useV4Swap() {
     }
   };
 
+  // Robust fetchQuote implementation
+  const fetchQuote = async ({
+    tokenIn,
+    tokenOut,
+    amountIn,
+    poolKey,
+    ticks,
+  }: {
+    tokenIn: Token;
+    tokenOut: Token;
+    amountIn: string;
+    poolKey: PoolKey;
+    ticks: any[];
+  }): Promise<string | null> => {
+    try {
+      // Defensive: check all required data
+      if (!tokenIn || !tokenOut || !amountIn || !poolKey) return null;
+      if (!chainId) return null;
+      const provider = walletClient?.transport?.provider || publicClient;
+      if (!provider) return null;
+
+      const { getPoolInfo, generatePoolId } = await import('../utils/stateViewUtils');
+      const poolId = generatePoolId(poolKey);
+      const poolInfo = await getPoolInfo(chainId, provider, poolId);
+      if (!poolInfo || !poolInfo.sqrtPriceX96 || !poolInfo.liquidity || poolInfo.tick === undefined) return null;
+
+      // Defensive: check decimals
+      if (typeof tokenIn.decimals !== 'number' || typeof tokenOut.decimals !== 'number') return null;
+
+      // Create tokens
+      const currency0 = new SDKToken(chainId, poolKey.currency0, tokenIn.decimals, tokenIn.symbol);
+      const currency1 = new SDKToken(chainId, poolKey.currency1, tokenOut.decimals, tokenOut.symbol);
+      // Use ticks array for v4
+      const pool = new Pool(
+        currency0,
+        currency1,
+        poolKey.fee,
+        poolKey.tickSpacing,
+        poolKey.hooks,
+        poolInfo.sqrtPriceX96,
+        poolInfo.liquidity,
+        poolInfo.tick,
+        ticks // <-- pass ticks array here
+      );
+      // Determine swap direction
+      const zeroForOne = poolKey.currency0.toLowerCase() === tokenIn.address.toLowerCase();
+      const amountInParsed = CurrencyAmount.fromRawAmount(zeroForOne ? currency0 : currency1, parseUnits(amountIn, tokenIn.decimals).toString());
+      const result: any = pool.getOutputAmount(amountInParsed, zeroForOne);
+      const amountOut = result?.amountOut;
+      if (!amountOut) return null;
+      return amountOut.toSignificant(6);
+    } catch (e) {
+      console.error('[fetchQuote] Quote error:', e);
+      return null;
+    }
+  };
+
   // State management for the swap form
   const [swapState, setSwapState] = useState<SwapState>({
     tokenIn: null,
@@ -576,5 +635,17 @@ export function useV4Swap() {
     // Utility functions
     isNativeToken,
     getChainFromId,
+    fetchQuote,
   };
+}
+
+// Minimal tick data provider for Uniswap v4 simulation
+class MinimalTickDataProvider {
+  getTick(tick) {
+    return { index: tick, liquidityNet: 0, liquidityGross: 0 };
+  }
+  nextInitializedTickWithinOneWord(tick, lte, tickSpacing) {
+    // Return the current tick as initialized
+    return { index: tick, initialized: true };
+  }
 }
