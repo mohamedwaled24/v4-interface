@@ -412,55 +412,10 @@ export function SwapForm() {
   // Restore useEffect for fetching pools
   useEffect(() => {
     setPoolsLoading(true);
-    fetch(GRAPHQL_ENDPOINTS.allPools,{
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: `
-          query Pool {
-    Pool {
-      id
-      chainId
-      name
-      createdAtTimestamp
-      createdAtBlockNumber
-      token0
-      token1
-      feeTier
-      liquidity
-      sqrtPrice
-      token0Price
-      token1Price
-      tick
-      tickSpacing
-      observationIndex
-      volumeToken0
-      volumeToken1
-      volumeUSD
-      untrackedVolumeUSD
-      feesUSD
-      feesUSDUntracked
-      txCount
-      collectedFeesToken0
-      collectedFeesToken1
-      collectedFeesUSD
-      totalValueLockedToken0
-      totalValueLockedToken1
-      totalValueLockedETH
-      totalValueLockedUSD
-      totalValueLockedUSDUntracked
-      liquidityProviderCount
-      hooks
-      db_write_timestamp
-  }
-  }`
-      })
-    })
+    fetch(GRAPHQL_ENDPOINTS.all)
       .then(res => res.json())
       .then(data => {
-        setAllPools(data.data?.Pool || []);
+        setAllPools(data.Pool || []);
         setPoolsLoading(false);
       })
       .catch(() => setPoolsLoading(false));
@@ -596,19 +551,27 @@ export function SwapForm() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query: `
-              query PoolTicks($poolId: String!) {
-                ticks(where: { pool: $poolId }) {
-                  index
-                  liquidityNet
-                  liquidityGross
-                }
-              }
+query Tick {
+  Tick {
+    chainId
+    createdAtBlockNumber
+    createdAtTimestamp
+    db_write_timestamp
+    id
+    liquidityGross
+    liquidityNet
+    pool_id
+    price0
+    price1
+    tickIdx
+  }
+}
             `,
-            variables: { poolId },
           }),
         });
         const data = await res.json();
-        setTicks(data.data?.ticks || []);
+        console.log(data , 'data')
+        setTicks(data.data?.Tick || []);
       } catch (e) {
         setTicks([]);
       }
@@ -618,46 +581,59 @@ export function SwapForm() {
 
   // Fetch quote when input changes
   useEffect(() => {
-    let cancelled = false;
-    async function getQuote() {
+  let cancelled = false;
+
+  async function getQuote() {
+    const { tokenIn, tokenOut, amountIn } = swapState;
+
+    // If any required field is missing, reset state
+    if (!tokenIn || !tokenOut || !amountIn || !selectedPoolKey || ticks.length === 0) {
       setQuote(null);
       setQuoteError(null);
-      if (
-        swapState.tokenIn &&
-        swapState.tokenOut &&
-        swapState.amountIn &&
-        selectedPoolKey &&
-        ticks.length > 0 // Only fetch quote if ticks are available
-      ) {
-        setQuoteLoading(true);
-        try {
-          const result = await fetchQuote({
-            tokenIn: swapState.tokenIn,
-            tokenOut: swapState.tokenOut,
-            amountIn: swapState.amountIn,
-            poolKey: selectedPoolKey,
-            ticks, // Pass ticks to fetchQuote
-          });
-          if (!cancelled) {
-            setQuote(result);
-            setQuoteError(result === null ? 'No quote available for this amount/pool.' : null);
-            // if (result) updateAmountOut(result); // Auto-fill output field (removed, output is read-only)
-          }
-        } catch (e) {
-          if (!cancelled) setQuoteError('Failed to fetch quote.');
-        } finally {
-          if (!cancelled) setQuoteLoading(false);
+      return;
+    }
+
+    setQuoteLoading(true);
+    setQuote(null);
+    setQuoteError(null);
+
+    try {
+      const result = await fetchQuote({
+        tokenIn,
+        tokenOut,
+        amountIn,
+        poolKey: selectedPoolKey,
+        ticks,
+      });
+
+      if (!cancelled) {
+        setQuote(result);
+        if (!result || Number(result) === 0) {
+          setQuoteError('No quote available for this amount/pool.');
+        } else {
+          setQuoteError(null);
         }
-      } else {
+      }
+    } catch (e) {
+      console.error('[SwapForm] Quote fetch failed:', e);
+      if (!cancelled) {
+        setQuoteError('Failed to fetch quote.');
         setQuote(null);
-        setQuoteError(null);
-        // updateAmountOut(''); // Clear output field if no quote (removed)
+      }
+    } finally {
+      if (!cancelled) {
+        setQuoteLoading(false);
       }
     }
-    getQuote();
-    return () => { cancelled = true; };
-  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, selectedPoolKey, ticks]);
-  
+  }
+
+  getQuote();
+
+  return () => {
+    cancelled = true;
+  };
+}, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, selectedPoolKey, ticks]);
+
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
       return;
@@ -700,7 +676,6 @@ export function SwapForm() {
       }
     } catch (error: any) {
       console.error('Swap execution error:', error);
-      
       // Check if it's a user rejection error
       const errorMessage = error.message || error.toString();
       if (

@@ -114,34 +114,53 @@ export const getStateViewContract = (chainId: number, client: any) => {
  * @param poolId Pool ID
  * @returns Pool information with existence and initialization status
  */
-export const getPoolInfo = async (chainId: number, client: any, poolId: `0x${string}`): Promise<PoolInfoResult> => {
+export const getPoolInfo = async (
+  chainId: number,
+  client: any,
+  rawPoolId: string // can be either '56_0x...' or '0x...'
+): Promise<PoolInfoResult> => {
   try {
     const stateView = getStateViewContract(chainId, client);
-    
+
+    // Normalize poolId: extract only '0x...' part if prefixed like '56_0x...'
+    const poolId = (rawPoolId.includes('_') ? rawPoolId.split('_')[1] : rawPoolId) as `0x${string}`;
+
     console.log(`Checking pool info for ID: ${poolId}`);
-    
-    // Try to get slot0 data and liquidity
-    const [slot0Data, liquidity] = await Promise.all([
-      stateView.read.getSlot0([poolId]),
-      stateView.read.getLiquidity([poolId])
-    ]);
-    
-    console.log('Pool slot0 data:', slot0Data);
-    console.log('Pool liquidity:', liquidity);
-    
-    // Extract values from slot0Data
+
+    // First, try to fetch slot0 data — safe even if pool not initialized
+    const slot0Data = await stateView.read.getSlot0([poolId]);
+
     const sqrtPriceX96 = slot0Data[0];
     const tick = Number(slot0Data[1]);
     const protocolFee = Number(slot0Data[2]);
     const lpFee = Number(slot0Data[3]);
-    
-    // Determine pool status based on actual values
-    const isInitialized = sqrtPriceX96 !== 0n || liquidity > 0n;
-    
-    console.log(`Pool exists: true, isInitialized: ${isInitialized}`);
-    
+
+    let liquidity = 0n;
+    let isInitialized = false;
+
+    // Only try to fetch liquidity if pool appears initialized
+    if (sqrtPriceX96 !== 0n) {
+      try {
+        liquidity = await stateView.read.getLiquidity([poolId]);
+        isInitialized = liquidity > 0n;
+      } catch (liquidityError) {
+        console.warn('getLiquidity failed — likely uninitialized pool', liquidityError);
+      }
+    }
+
+    const exists = sqrtPriceX96 !== 0n || liquidity > 0n;
+
+    console.log('Pool slot0 data:', {
+      sqrtPriceX96,
+      tick,
+      protocolFee,
+      lpFee
+    });
+    console.log('Pool liquidity:', liquidity);
+    console.log(`Pool exists: ${exists}, isInitialized: ${isInitialized}`);
+
     return {
-      exists: true,
+      exists,
       isInitialized,
       sqrtPriceX96: sqrtPriceX96.toString(),
       tick,
@@ -149,12 +168,11 @@ export const getPoolInfo = async (chainId: number, client: any, poolId: `0x${str
       lpFee,
       liquidity: liquidity.toString()
     };
-    
+
   } catch (error) {
     console.error('Error getting pool info:', error);
-    console.log('Pool does not exist');
-    
-    // Return default values indicating pool doesn't exist
+    console.log('Pool does not exist or getSlot0 failed');
+
     return {
       exists: false,
       isInitialized: false,
@@ -166,6 +184,7 @@ export const getPoolInfo = async (chainId: number, client: any, poolId: `0x${str
     };
   }
 };
+
 
 /**
  * Check if a pool needs to be created

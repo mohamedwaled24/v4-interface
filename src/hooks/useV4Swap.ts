@@ -8,6 +8,7 @@ import { Token as SDKToken, Currency, TradeType, Percent, CurrencyAmount } from 
 import universalRouterAbi from '../../contracts/universalRouter.json'
 import permit2Abi from '../../contracts/permit2.json'
 import { ERC20_ABI } from '../../contracts/ERC20_ABI'
+import { getQuoteFromSqrtPriceX96 } from '../utils/getQuoteFromSqrtPriceX96'
 
 
 //TO-DO: Swapping tokens and sending to a recepient, Multi Hop swap
@@ -436,6 +437,8 @@ export function useV4Swap() {
     }
   };
 
+  
+
   // Robust fetchQuote implementation
   const fetchQuote = async ({
     tokenIn,
@@ -451,48 +454,67 @@ export function useV4Swap() {
     ticks: any[];
   }): Promise<string | null> => {
     try {
-      // Defensive: check all required data
-      if (!tokenIn || !tokenOut || !amountIn || !poolKey) return null;
-      if (!chainId) return null;
+      if (!tokenIn || !tokenOut || !amountIn || !poolKey || !chainId) return null;
       const provider = walletClient?.transport?.provider || publicClient;
       if (!provider) return null;
-
+  
       const { getPoolInfo, generatePoolId } = await import('../utils/stateViewUtils');
       const poolId = generatePoolId(poolKey);
       const poolInfo = await getPoolInfo(chainId, provider, poolId);
-      if (!poolInfo || !poolInfo.sqrtPriceX96 || !poolInfo.liquidity || poolInfo.tick === undefined) return null;
-
-      // Defensive: check decimals
+  
+      if (!poolInfo || !poolInfo.sqrtPriceX96 || poolInfo.tick === undefined) return null;
       if (typeof tokenIn.decimals !== 'number' || typeof tokenOut.decimals !== 'number') return null;
-
-      // Create tokens
+  
       const currency0 = new SDKToken(chainId, poolKey.currency0, tokenIn.decimals, tokenIn.symbol);
       const currency1 = new SDKToken(chainId, poolKey.currency1, tokenOut.decimals, tokenOut.symbol);
-      // Use ticks array for v4
-      const pool = new Pool(
-        currency0,
-        currency1,
-        poolKey.fee,
-        poolKey.tickSpacing,
-        poolKey.hooks,
-        poolInfo.sqrtPriceX96,
-        poolInfo.liquidity,
-        poolInfo.tick,
-        ticks // <-- pass ticks array here
-      );
-      // Determine swap direction
+  
       const zeroForOne = poolKey.currency0.toLowerCase() === tokenIn.address.toLowerCase();
-      const amountInParsed = CurrencyAmount.fromRawAmount(zeroForOne ? currency0 : currency1, parseUnits(amountIn, tokenIn.decimals).toString());
-      const result: any = pool.getOutputAmount(amountInParsed, zeroForOne);
-      const amountOut = result?.amountOut;
-      if (!amountOut) return null;
-      return amountOut.toSignificant(6);
+  
+      // Try using Uniswap SDK first
+      try {
+        const pool = new Pool(
+          currency0,
+          currency1,
+          poolKey.fee,
+          poolKey.tickSpacing,
+          poolKey.hooks,
+          poolInfo.sqrtPriceX96,
+          poolInfo.liquidity,
+          poolInfo.tick,
+          ticks
+        );
+  
+        const amountInParsed = CurrencyAmount.fromRawAmount(
+          zeroForOne ? currency0 : currency1,
+          parseUnits(amountIn, tokenIn.decimals).toString()
+        );
+  
+        const result: any = pool.getOutputAmount(amountInParsed, zeroForOne);
+        const amountOut = result?.amountOut;
+        if (amountOut) {
+          return amountOut.toSignificant(6);
+        }
+      } catch (sdkError) {
+        console.warn('[fetchQuote] SDK pool failed — trying fallback', sdkError);
+      }
+  
+      // 🔁 Fallback: use sqrtPriceX96 directly
+      const fallbackAmountOut = getQuoteFromSqrtPriceX96(
+        amountIn,
+        BigInt(poolInfo.sqrtPriceX96),
+        tokenIn.decimals,
+        tokenOut.decimals,
+        zeroForOne // tokenInIsToken0
+      );
+  
+      return fallbackAmountOut;
+  
     } catch (e) {
       console.error('[fetchQuote] Quote error:', e);
       return null;
     }
   };
-
+  
   // State management for the swap form
   const [swapState, setSwapState] = useState<SwapState>({
     tokenIn: null,
