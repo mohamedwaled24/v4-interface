@@ -464,36 +464,36 @@ export function useV4Swap() {
   const [poolInfo, setPoolInfo] = useState<PoolInfo | null>(null);
 
   // Update functions
-  const updateTokenIn = (token: Token | null) => {
+  const updateTokenIn = useCallback((token: Token | null) => {
     setSwapState(prev => ({ ...prev, tokenIn: token }));
-  };
+  }, []);
 
-  const updateTokenOut = (token: Token | null) => {
+  const updateTokenOut = useCallback((token: Token | null) => {
     setSwapState(prev => ({ ...prev, tokenOut: token }));
-  };
+  }, []);
 
-  const updateAmountIn = (amount: string) => {
+  const updateAmountIn = useCallback((amount: string) => {
     setSwapState(prev => ({ ...prev, amountIn: amount }));
-  };
+  }, []);
 
-  const updatePoolId = (poolKeyStr: string) => {
+  const updatePoolId = useCallback((poolKeyStr: string) => {
     try {
       const poolKey = poolKeyStr ? JSON.parse(poolKeyStr) : null;
       setSwapState(prev => ({ ...prev, poolKey }));
     } catch (error) {
       setSwapState(prev => ({ ...prev, poolKey: null }));
     }
-  };
+  }, []);
 
-  const updateSlippageTolerance = (tolerance: number) => {
+  const updateSlippageTolerance = useCallback((tolerance: number) => {
     setSwapState(prev => ({ ...prev, slippageTolerance: tolerance }));
-  };
+  }, []);
 
-  const updateDeadline = (deadline: number) => {
+  const updateDeadline = useCallback((deadline: number) => {
     setSwapState(prev => ({ ...prev, deadline }));
-  };
+  }, []);
 
-  const swapTokens = () => {
+  const swapTokens = useCallback(() => {
     setSwapState(prev => ({
       ...prev,
       tokenIn: prev.tokenOut,
@@ -501,7 +501,7 @@ export function useV4Swap() {
       amountIn: '',
       amountOut: ''
     }));
-  };
+  }, []);
 
   const validateSwap = (): boolean => {
     const newValidation: SwapValidation = {};
