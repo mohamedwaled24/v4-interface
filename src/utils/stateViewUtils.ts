@@ -1,11 +1,8 @@
 import { 
-  createPublicClient, 
-  http, 
   getContract, 
   encodeAbiParameters, 
   keccak256, 
   Hex, 
-  custom,
 } from 'viem';
 import { CONTRACTS } from '../constants/contracts';
 import stateViewABI from '../../contracts/stateView.json';
@@ -90,37 +87,45 @@ export const generatePositionId = (poolId: `0x${string}`, positionInfo: Position
 };
 
 /**
- * Create a StateView contract instance
+ * ✅ FIXED: Create a StateView contract instance using publicClient for reading
  * @param chainId Chain ID
- * @param provider Wallet provider (e.g., window.ethereum)
+ * @param publicClient Public client from wagmi for reading contracts
  * @returns StateView contract instance
  */
-export const getStateViewContract = (chainId: number, client: any) => {
+export const getStateViewContract = (chainId: number, publicClient: any) => {
   if (!CONTRACTS[chainId as keyof typeof CONTRACTS]) {
     throw new Error(`Unsupported chain ID: ${chainId}`);
+  }
+
+  if (!publicClient) {
+    throw new Error('Public client is required');
   }
 
   return getContract({
     address: CONTRACTS[chainId as keyof typeof CONTRACTS].StateView as `0x${string}`,
     abi: stateViewABI,
-    client // <-- pass walletClient directly
+    client: publicClient // ✅ Use publicClient for reading
   });
 };
 
 /**
- * Get pool information and existence status using the StateView contract
+ * ✅ FIXED: Get pool information using publicClient for reading
  * @param chainId Chain ID
- * @param provider Wallet provider (e.g., window.ethereum)
- * @param poolId Pool ID
+ * @param publicClient Public client from wagmi for reading contracts
+ * @param rawPoolId Pool ID
  * @returns Pool information with existence and initialization status
  */
 export const getPoolInfo = async (
   chainId: number,
-  client: any,
+  publicClient: any, // ✅ Use publicClient for reading
   rawPoolId: string // can be either '56_0x...' or '0x...'
 ): Promise<PoolInfoResult> => {
   try {
-    const stateView = getStateViewContract(chainId, client);
+    if (!publicClient) {
+      throw new Error('Public client is required');
+    }
+
+    const stateView = getStateViewContract(chainId, publicClient);
 
     // Normalize poolId: extract only '0x...' part if prefixed like '56_0x...'
     const poolId = (rawPoolId.includes('_') ? rawPoolId.split('_')[1] : rawPoolId) as `0x${string}`;
@@ -185,7 +190,6 @@ export const getPoolInfo = async (
   }
 };
 
-
 /**
  * Check if a pool needs to be created
  * @param poolInfo Pool information from getPoolInfo
@@ -214,24 +218,28 @@ export const isPoolReady = (poolInfo: PoolInfoResult): boolean => {
 };
 
 /**
- * Get position information using the StateView contract
+ * ✅ FIXED: Get position information using publicClient for reading
  * @param chainId Chain ID
- * @param rpcUrl RPC URL
+ * @param publicClient Public client from wagmi for reading contracts
  * @param poolId Pool ID
  * @param positionId Position ID
  * @returns Position information or null if position doesn't exist
  */
 export const getPositionInfo = async (
   chainId: number, 
-  rpcUrl: string, 
+  publicClient: any, // ✅ Use publicClient for reading
   poolId: `0x${string}`, 
   positionId: `0x${string}`
 ) => {
   try {
-    const stateView = getStateViewContract(chainId, rpcUrl);
-    
+    if (!publicClient) {
+      throw new Error('Public client is required');
+    }
+
+    const stateView = getStateViewContract(chainId, publicClient); // ✅ Use publicClient
+
     const positionInfo = await stateView.read.getPositionInfo([poolId, positionId]);
-    
+
     return {
       liquidity: positionInfo[0],
       feeGrowthInside0LastX128: positionInfo[1],

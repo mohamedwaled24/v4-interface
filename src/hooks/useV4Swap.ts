@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
 import { parseUnits, keccak256, encodePacked, encodeAbiParameters, maxUint256, encodeFunctionData, getAddress } from 'viem'
 import { SUPPORTED_NETWORKS } from '../constants/networks'
@@ -10,14 +10,13 @@ import permit2Abi from '../../contracts/permit2.json'
 import { ERC20_ABI } from '../../contracts/ERC20_ABI'
 import { getQuoteFromSqrtPriceX96 } from '../utils/getQuoteFromSqrtPriceX96'
 
-
-//TO-DO: Swapping tokens and sending to a recepient, Multi Hop swap
 export interface Token {
   address: string
   symbol: string
   name: string
   decimals: number
   logoURI?: string
+  chainId?: number
 }
 
 export interface PoolKey {
@@ -51,6 +50,7 @@ interface PoolInfo {
   fee: number
   liquidity: string
   tick: number
+  sqrtPriceX96?: string
 }
 
 interface SwapResult {
@@ -59,74 +59,326 @@ interface SwapResult {
   txHash?: string
 }
 
-// V4 Universal Router Commands - following SDK pattern
+interface EnhancedPoolInfo extends PoolInfo {
+  poolKey: PoolKey
+  tvl?: number
+  volume24h?: number
+  estimatedOutput?: string
+}
+
 const CommandType = {
   V4_SWAP: 0x10
 } as const
 
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 
-const PERMIT2_DOMAIN = {
-  name: 'Permit2',
-  chainId: 0,
-  verifyingContract: PERMIT2_ADDRESS as `0x${string}`
-};
-
+// Enhanced native token detection
 export const isNativeToken = (tokenAddress: string): boolean => {
-  return tokenAddress === '0x0000000000000000000000000000000000000000' ||
-         tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+  if (!tokenAddress) return false;
+  const addr = tokenAddress.toLowerCase();
+  return addr === '0x0000000000000000000000000000000000000000' ||
+         addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' ||
+         addr === 'eth' ||
+         addr === '0xeee';
 };
 
-export const normalizeTokenAddress = (tokenAddress: string): string => {
+// More flexible address normalization
+export const normalizeTokenAddress = (tokenAddress: string, preserveNative = false): string => {
+  if (!tokenAddress) return '0x0000000000000000000000000000000000000000';
+  
   if (isNativeToken(tokenAddress)) {
-    return '0x0000000000000000000000000000000000000000';
+    return preserveNative ? tokenAddress : '0x0000000000000000000000000000000000000000';
   }
-  return tokenAddress;
+  
+  try {
+    return getAddress(tokenAddress);
+  } catch {
+    return tokenAddress;
+  }
 };
 
-const PERMIT2_BATCH_TYPES = {
-  PermitBatch: [
-    { name: 'details', type: 'PermitDetails[]' },
-    { name: 'spender', type: 'address' },
-    { name: 'sigDeadline', type: 'uint256' }
-  ],
-  PermitDetails: [
-    { name: 'token', type: 'address' },
-    { name: 'amount', type: 'uint160' },
-    { name: 'expiration', type: 'uint48' },
-    { name: 'nonce', type: 'uint48' }
-  ]
+// ✅ FIXED: Memoized normalization to prevent unnecessary object creation
+export const normalizePoolKey = (poolKey: PoolKey): PoolKey => {
+  const currency0 = normalizeTokenAddress(poolKey.currency0);
+  const currency1 = normalizeTokenAddress(poolKey.currency1);
+  
+  // Return same object if no changes needed
+  if (currency0 === poolKey.currency0 && currency1 === poolKey.currency1) {
+    return poolKey;
+  }
+  
+  return {
+    ...poolKey,
+    currency0,
+    currency1
+  };
+};
+
+export const orderPoolTokens = (tokenA: string, tokenB: string): { currency0: string; currency1: string } => {
+  const normalizedA = normalizeTokenAddress(tokenA);
+  const normalizedB = normalizeTokenAddress(tokenB);
+  
+  return normalizedA.toLowerCase() < normalizedB.toLowerCase() 
+    ? { currency0: normalizedA, currency1: normalizedB }
+    : { currency0: normalizedB, currency1: normalizedA };
+};
+
+// ✅ FIXED: Helper to compare pool keys deeply
+const arePoolKeysEqual = (a: PoolKey | null, b: PoolKey | null): boolean => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  
+  return (
+    a.currency0.toLowerCase() === b.currency0.toLowerCase() &&
+    a.currency1.toLowerCase() === b.currency1.toLowerCase() &&
+    a.fee === b.fee &&
+    a.tickSpacing === b.tickSpacing &&
+    a.hooks.toLowerCase() === b.hooks.toLowerCase()
+  );
 };
 
 export function useV4Swap() {
   const { isConnected, address } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const publicClient = usePublicClient();
-  // Prefer walletClient.chain.id, fallback to publicClient.chain.id, fallback to 1 (mainnet)
-  const chainId = walletClient?.chain.id || publicClient?.chain?.id || 1;
+  const publicClient = usePublicClient(); // ✅ Use publicClient for reading contracts
+  
+  const chainId = walletClient?.chain?.id || publicClient?.chain?.id || 1;
 
-  const getChainFromId = (chainId: number) => {
+  // ✅ FIXED: Use ref to track last pool key to prevent infinite updates
+  const lastPoolKeyRef = useRef<PoolKey | null>(null);
+
+  const [swapState, setSwapState] = useState<SwapState>({
+    tokenIn: null,
+    tokenOut: null,
+    amountIn: '',
+    amountOut: '',
+    poolKey: null,
+    slippageTolerance: 50,
+    deadline: Math.floor(Date.now() / 1000) + 1800
+  });
+
+  const [validation, setValidation] = useState<SwapValidation>({});
+  const [isSwapping, setIsSwapping] = useState(false);
+  const [isValidatingPool, setIsValidatingPool] = useState(false);
+  const [poolInfo, setPoolInfo] = useState<PoolInfo | null>(null);
+
+  const getChainFromId = useCallback((chainId: number) => {
     const network = SUPPORTED_NETWORKS.find(net => net.id === chainId);
     if (!network) {
       throw new Error(`Unsupported chain ID: ${chainId}`);
     }
     return network;
-  };
+  }, []);
 
+  // ✅ FIXED: Memoized token updates to prevent unnecessary re-renders
+  const updateTokenIn = useCallback((token: Token | null) => {
+    console.log('🔥 useV4Swap: updateTokenIn called with:', token);
+    
+    setSwapState(prev => {
+      // Don't update if same token
+      if (prev.tokenIn === token) return prev;
+      
+      const tokenWithChainId = token ? {
+        ...token,
+        chainId: token.chainId || chainId,
+        address: token.address
+      } : null;
+      
+      console.log('🔥 useV4Swap: Setting tokenIn from', prev.tokenIn, 'to', tokenWithChainId);
+      return { 
+        ...prev, 
+        tokenIn: tokenWithChainId,
+        amountIn: '',
+        amountOut: '',
+        // Clear pool key when tokens change
+        poolKey: null
+      };
+    });
+    
+    // Reset the ref when token changes
+    lastPoolKeyRef.current = null;
+  }, [chainId]);
 
+  const updateTokenOut = useCallback((token: Token | null) => {
+    console.log('🔥 useV4Swap: updateTokenOut called with:', token);
+    
+    setSwapState(prev => {
+      // Don't update if same token
+      if (prev.tokenOut === token) return prev;
+      
+      const tokenWithChainId = token ? {
+        ...token,
+        chainId: token.chainId || chainId,
+        address: token.address
+      } : null;
+      
+      console.log('🔥 useV4Swap: Setting tokenOut from', prev.tokenOut, 'to', tokenWithChainId);
+      return { 
+        ...prev, 
+        tokenOut: tokenWithChainId,
+        amountOut: '',
+        // Clear pool key when tokens change
+        poolKey: null
+      };
+    });
+    
+    // Reset the ref when token changes
+    lastPoolKeyRef.current = null;
+  }, [chainId]);
 
-  const approveTokenToPermit2 = async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
-    const normalizedAddress = normalizeTokenAddress(tokenAddress);
-    if (!walletClient || !publicClient || isNativeToken(normalizedAddress)) {
-      return { success: true };
+  const updateAmountIn = useCallback((amount: string) => {
+    setSwapState(prev => {
+      if (prev.amountIn === amount) return prev;
+      return { ...prev, amountIn: amount, amountOut: '' };
+    });
+  }, []);
+
+  // ✅ FIXED: Smart pool key update that prevents infinite loops
+  const updatePoolId = useCallback((poolKeyStr: string) => {
+    try {
+      const poolKey = poolKeyStr ? JSON.parse(poolKeyStr) : null;
+      const normalizedPoolKey = poolKey ? normalizePoolKey(poolKey) : null;
+      
+      // Check if this is actually a different pool key
+      if (arePoolKeysEqual(lastPoolKeyRef.current, normalizedPoolKey)) {
+        console.log('🔄 Pool key unchanged, skipping update');
+        return;
+      }
+      
+      console.log('🔄 Updating pool key:', normalizedPoolKey);
+      lastPoolKeyRef.current = normalizedPoolKey;
+      
+      setSwapState(prev => {
+        // Double-check to prevent unnecessary updates
+        if (arePoolKeysEqual(prev.poolKey, normalizedPoolKey)) {
+          return prev;
+        }
+        return { ...prev, poolKey: normalizedPoolKey };
+      });
+    } catch (error) {
+      console.error('Invalid pool key JSON:', error);
+      lastPoolKeyRef.current = null;
+      setSwapState(prev => ({ ...prev, poolKey: null }));
     }
+  }, []);
+
+  const updateSlippageTolerance = useCallback((tolerance: number) => {
+    setSwapState(prev => {
+      if (prev.slippageTolerance === tolerance) return prev;
+      return { ...prev, slippageTolerance: tolerance };
+    });
+  }, []);
+
+  const updateDeadline = useCallback((deadline: number) => {
+    setSwapState(prev => {
+      if (prev.deadline === deadline) return prev;
+      return { ...prev, deadline };
+    });
+  }, []);
+
+  const swapTokens = useCallback(() => {
+    setSwapState(prev => ({
+      ...prev,
+      tokenIn: prev.tokenOut,
+      tokenOut: prev.tokenIn,
+      amountIn: '',
+      amountOut: '',
+      poolKey: null
+    }));
+    lastPoolKeyRef.current = null;
+  }, []);
+
+  // ✅ FIXED: Use publicClient for reading contracts
+  const fetchQuote = useCallback(async ({
+    tokenIn,
+    tokenOut,
+    amountIn,
+    poolKey,
+    ticks,
+  }: {
+    tokenIn: Token;
+    tokenOut: Token;
+    amountIn: string;
+    poolKey: PoolKey;
+    ticks: any[];
+  }): Promise<string | null> => {
+    try {
+      if (!tokenIn || !tokenOut || !amountIn || !poolKey || !publicClient) return null;
+
+      const normalizedPoolKey = normalizePoolKey(poolKey);
+      
+      const { getPoolInfo, generatePoolId } = await import('../utils/stateViewUtils');
+      const poolId = generatePoolId(normalizedPoolKey);
+      
+      // ✅ Use publicClient for reading
+      const poolInfo = await getPoolInfo(chainId, publicClient, poolId);
+
+      if (!poolInfo || !poolInfo.sqrtPriceX96 || poolInfo.tick === undefined) return null;
+      if (typeof tokenIn.decimals !== 'number' || typeof tokenOut.decimals !== 'number') return null;
+
+      const normalizedTokenInAddr = normalizeTokenAddress(tokenIn.address);
+      const normalizedTokenOutAddr = normalizeTokenAddress(tokenOut.address);
+      
+      const currency0 = new SDKToken(chainId, normalizedPoolKey.currency0, tokenIn.decimals, tokenIn.symbol);
+      const currency1 = new SDKToken(chainId, normalizedPoolKey.currency1, tokenOut.decimals, tokenOut.symbol);
+
+      const zeroForOne = normalizedPoolKey.currency0.toLowerCase() === normalizedTokenInAddr.toLowerCase();
+
+      try {
+        const pool = new Pool(
+          currency0,
+          currency1,
+          normalizedPoolKey.fee,
+          normalizedPoolKey.tickSpacing,
+          normalizedPoolKey.hooks,
+          poolInfo.sqrtPriceX96,
+          poolInfo.liquidity,
+          poolInfo.tick,
+          ticks
+        );
+
+        const amountInParsed = CurrencyAmount.fromRawAmount(
+          zeroForOne ? currency0 : currency1,
+          parseUnits(amountIn, tokenIn.decimals).toString()
+        );
+
+        const result: any = pool.getOutputAmount(amountInParsed, zeroForOne);
+        const amountOut = result?.amountOut;
+        if (amountOut) {
+          return amountOut.toSignificant(6);
+        }
+      } catch (sdkError) {
+        console.warn('[fetchQuote] SDK pool failed — trying fallback', sdkError);
+      }
+
+      const fallbackAmountOut = getQuoteFromSqrtPriceX96(
+        amountIn,
+        BigInt(poolInfo.sqrtPriceX96),
+        tokenIn.decimals,
+        tokenOut.decimals,
+        zeroForOne
+      );
+
+      return fallbackAmountOut;
+
+    } catch (e) {
+      console.error('[fetchQuote] Quote error:', e);
+      return null;
+    }
+  }, [chainId, publicClient]);
+
+  // ✅ FIXED: Use publicClient for reading, walletClient for writing
+  const approveTokenToPermit2 = useCallback(async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
+    const normalizedAddress = normalizeTokenAddress(tokenAddress);
+    
     if (!walletClient || !publicClient || isNativeToken(tokenAddress)) {
       return { success: true };
     }
 
     try {
+      // ✅ Use publicClient for reading allowance
       const currentAllowance = await publicClient.readContract({
-        address: normalizedAddress  as `0x${string}`,
+        address: normalizedAddress as `0x${string}`,
         abi: ERC20_ABI,
         functionName: 'allowance',
         args: [address as `0x${string}`, PERMIT2_ADDRESS as `0x${string}`]
@@ -142,35 +394,35 @@ export function useV4Swap() {
         args: [PERMIT2_ADDRESS as `0x${string}`, maxUint256]
       });
 
+      // ✅ Use walletClient for sending transaction
       const hash = await walletClient.sendTransaction({
         to: normalizedAddress as `0x${string}`,
         data,
         account: address as `0x${string}`,
-        chain: getChainFromId(chainId!),
+        chain: getChainFromId(chainId),
       });
 
+      // ✅ Use publicClient to wait for receipt
       await publicClient.waitForTransactionReceipt({ hash });
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
-  };
+  }, [walletClient, publicClient, address, chainId, getChainFromId]);
 
-  const checkPermit2Allowance = async (tokenAddress: string, spender: string): Promise<{ amount: bigint; expiration: number; nonce: number }> => {
+  const checkPermit2Allowance = useCallback(async (tokenAddress: string, spender: string): Promise<{ amount: bigint; expiration: number; nonce: number }> => {
     const normalizedAddress = normalizeTokenAddress(tokenAddress);
-    if (!publicClient || !address || isNativeToken(normalizedAddress)) {
-      return { amount: BigInt(0), expiration: 0, nonce: 0 };
-    }
     if (!publicClient || !address || isNativeToken(tokenAddress)) {
       return { amount: BigInt(0), expiration: 0, nonce: 0 };
     }
 
     try {
+      // ✅ Use publicClient for reading contract
       const result = await publicClient.readContract({
         address: PERMIT2_ADDRESS as `0x${string}`,
         abi: permit2Abi.abi,
         functionName: 'allowance',
-        args: [address as `0x${string}`, normalizedAddress  as `0x${string}`, spender as `0x${string}`]
+        args: [address as `0x${string}`, normalizedAddress as `0x${string}`, spender as `0x${string}`]
       });
 
       return {
@@ -181,106 +433,10 @@ export function useV4Swap() {
     } catch (error) {
       return { amount: BigInt(0), expiration: 0, nonce: 0 };
     }
-  };
+  }, [publicClient, address]);
 
-  const signPermit2Batch = async (permitBatch: any): Promise<string> => {
-    if (!walletClient) {
-      throw new Error('Wallet not available');
-    }
-
-    const domain = {
-      ...PERMIT2_DOMAIN,
-      chainId: chainId!
-    };
-
-    // Helper function to extract value from JSBI or other complex objects
-    const extractNumericValue = (value: any): string => {
-      // Handle JSBI objects specifically
-      if (value && typeof value === 'object') {
-        // Check if it's a JSBI instance by looking for JSBI-specific methods/properties
-        if (value.constructor && (value.constructor.name === 'JSBI' || value.constructor.name === '_JSBI')) {
-          // Use JSBI's toString method
-          return value.toString();
-        }
-        
-        // Check if it has a toString method that returns a valid number string
-        if (typeof value.toString === 'function') {
-          const stringValue = value.toString();
-          // Verify it's a valid number string (not "[object Object]")
-          if (/^\d+$/.test(stringValue)) {
-            return stringValue;
-          }
-        }
-        
-        // If it's an object with a 'words' array (BigNumber-like structure)
-        if (value.words && Array.isArray(value.words)) {
-          // Try to convert BigNumber-like object to string
-          try {
-            return value.toString();
-          } catch (e) {
-            console.warn('Failed to convert BigNumber-like object:', value);
-          }
-        }
-        
-        // Handle regular arrays (fallback)
-        if (Array.isArray(value)) {
-          return value[0]?.toString() || '0';
-        }
-      }
-      
-      // Handle regular numbers, bigints, strings
-      if (typeof value === 'bigint') {
-        return value.toString();
-      }
-      
-      if (typeof value === 'number') {
-        return value.toString();
-      }
-      
-      if (typeof value === 'string') {
-        return value.replace(/,/g, '');
-      }
-      
-      // Last resort
-      console.warn('Unexpected value type in extractNumericValue:', typeof value, value);
-      return '0';
-    };
-
-    // Deep clone and sanitize the permit batch data
-    const sanitizedPermitBatch = {
-      spender: permitBatch.spender,
-      sigDeadline: extractNumericValue(permitBatch.sigDeadline),
-      details: permitBatch.details.map((detail: any) => {
-        console.log('Original detail:', detail);
-        console.log('Amount type and constructor:', typeof detail.amount, detail.amount?.constructor?.name);
-        console.log('Amount methods:', detail.amount && typeof detail.amount === 'object' ? Object.getOwnPropertyNames(detail.amount) : 'N/A');
-        
-        const sanitizedDetail = {
-          token: detail.token,
-          amount: extractNumericValue(detail.amount),
-          expiration: extractNumericValue(detail.expiration),
-          nonce: extractNumericValue(detail.nonce)
-        };
-        
-        console.log('Sanitized detail:', sanitizedDetail);
-        return sanitizedDetail;
-      })
-    };
-
-    console.log('Final sanitized permit batch:', sanitizedPermitBatch);
-
-    const signature = await walletClient.signTypedData({
-      account: address as `0x${string}`,
-      domain,
-      types: PERMIT2_BATCH_TYPES,
-      primaryType: 'PermitBatch',
-      message: sanitizedPermitBatch
-    });
-
-    return signature;
-  };
-
-  const executeSwap = async (swapParameters: {
+  // ✅ FIXED: Use publicClient for reading, walletClient for writing
+  const executeSwap = useCallback(async (swapParameters: {
     poolKey: PoolKey;
     tokenIn: Token;
     tokenOut: Token;
@@ -295,11 +451,18 @@ export function useV4Swap() {
     }
 
     try {
-      const { poolKey, tokenIn, tokenOut, amountIn, amountOutMinimum, recipient, deadline, usePermit } = swapParameters;
+      const { poolKey, tokenIn, tokenOut, amountIn, amountOutMinimum, deadline } = swapParameters;
       
-      const swapDeadline = deadline || Math.floor(Date.now() / 1000) + 1800; // 30 minutes
+      console.log('🚀 Starting swap with parameters:', {
+        tokenIn: { symbol: tokenIn.symbol, address: tokenIn.address, isNative: isNativeToken(tokenIn.address) },
+        tokenOut: { symbol: tokenOut.symbol, address: tokenOut.address, isNative: isNativeToken(tokenOut.address) },
+        amountIn,
+        poolKey
+      });
+
+      const normalizedPoolKey = normalizePoolKey(poolKey);
+      const swapDeadline = deadline || Math.floor(Date.now() / 1000) + 1800;
       
-      // Parse amounts
       const amountInWei = parseUnits(amountIn.replace(/,/g, ''), tokenIn.decimals);
       const amountOutMinWei = parseUnits(amountOutMinimum.replace(/,/g, ''), tokenOut.decimals);
       
@@ -308,91 +471,94 @@ export function useV4Swap() {
         return { success: false, error: 'Universal Router not available on this chain' };
       }
 
-      // Step 1: Explicitly set Permit2 approval for Universal Router (30 days expiration) for all non-native token swaps
-      const normalizedTokenInAddress = normalizeTokenAddress(tokenIn.address);
-      if (!isNativeToken(normalizedTokenInAddress)) {
-        const permit2Expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30; // 30 days from now
-        // Approve Permit2 for Universal Router with maxUint256 and 30 days expiration
+      // Handle approvals for non-native tokens
+      if (!isNativeToken(tokenIn.address)) {
+        console.log('🔐 Handling approvals for token:', tokenIn.symbol);
+        
+        const permit2Expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
         const approval = await approveTokenToPermit2(tokenIn.address, amountInWei);
         if (!approval.success) {
           return { success: false, error: approval.error };
         }
-        // Explicitly approve Universal Router in Permit2 with 30-day expiration
+
+        // Permit2 approval for Universal Router - use walletClient for writing
         const permit2ApprovalTx = await walletClient.writeContract({
           address: PERMIT2_ADDRESS as `0x${string}`,
           abi: permit2Abi.abi,
           functionName: 'approve',
           args: [
-            normalizedTokenInAddress as `0x${string}`,
+            normalizeTokenAddress(tokenIn.address) as `0x${string}`,
             universalRouterAddress as `0x${string}`,
             amountInWei,
             BigInt(permit2Expiration)
           ],
           account: address as `0x${string}`,
-          chain: walletClient.chain!, // Use walletClient.chain directly
+          chain: walletClient.chain!,
         });
+        
+        // ✅ Use publicClient to wait for receipt
         await publicClient.waitForTransactionReceipt({ hash: permit2ApprovalTx });
+        console.log('✅ Approvals completed');
       }
 
-      // Step 2: Skip SDK Currency objects - we don't actually need them for V4Planner
-      // The V4Planner works directly with addresses from the poolKey
-      
-      // Step 3: Skip CurrencyAmount objects - not needed for direct V4Planner usage
-
-      // Step 4: Create V4Planner with exact test pattern
+      // Create V4 swap plan
       const v4Planner = new V4Planner();
       
-      // Determine zeroForOne based on poolKey currencies (already ordered)
-      const zeroForOne = poolKey.currency0.toLowerCase() === tokenIn.address.toLowerCase();
+      const normalizedTokenInAddr = normalizeTokenAddress(tokenIn.address);
+      const zeroForOne = normalizedPoolKey.currency0.toLowerCase() === normalizedTokenInAddr.toLowerCase();
       
-      // Add swap action - exact match to test pattern
+      console.log('📋 Creating swap plan:', {
+        zeroForOne,
+        currency0: normalizedPoolKey.currency0,
+        currency1: normalizedPoolKey.currency1,
+        tokenInNormalized: normalizedTokenInAddr
+      });
+
       v4Planner.addAction(Actions.SWAP_EXACT_IN_SINGLE, [
         {
-          poolKey: poolKey,
+          poolKey: normalizedPoolKey,
           zeroForOne: zeroForOne,
           amountIn: amountInWei,
           amountOutMinimum: amountOutMinWei,
           hookData: '0x'
         }
       ]);
-      
-      // Add settle all - use poolKey currency addresses
+
       v4Planner.addAction(Actions.SETTLE_ALL, [
-        zeroForOne ? poolKey.currency0 : poolKey.currency1, // Input currency from poolKey
-        maxUint256 // Use MAX_UINT like in tests
+        zeroForOne ? normalizedPoolKey.currency0 : normalizedPoolKey.currency1,
+        maxUint256
       ]);
-      
-      // Add take all - use poolKey currency addresses  
+
       v4Planner.addAction(Actions.TAKE_ALL, [
-        zeroForOne ? poolKey.currency1 : poolKey.currency0, // Output currency from poolKey
-        BigInt(0) // Use 0 like in tests
+        zeroForOne ? normalizedPoolKey.currency1 : normalizedPoolKey.currency0,
+        BigInt(0)
       ]);
-      
-      // Step 5: Access actions and params directly like in tests
+
+      // Prepare transaction data
       const encodedActions = (typeof v4Planner.actions === 'string' && v4Planner.actions.startsWith('0x'))
         ? v4Planner.actions as `0x${string}`
         : `0x${Buffer.from(v4Planner.actions).toString('hex')}` as `0x${string}`;
       const encodedParams = Array.isArray(v4Planner.params)
         ? v4Planner.params.map(p => (typeof p === 'string' && p.startsWith('0x')) ? p as `0x${string}` : `0x${Buffer.from(p).toString('hex')}` as `0x${string}`)
         : [];
-      
-      // Step 6: Create Universal Router command exactly like tests
+
       const commands = encodePacked(['uint8'], [CommandType.V4_SWAP]);
-      
-      // Step 7: Properly structure inputs - combine actions and params into single input
       const combinedInput = encodeAbiParameters(
         [{ name: 'actions', type: 'bytes' }, { name: 'params', type: 'bytes[]' }],
         [encodedActions, encodedParams]
       );
       const inputs = [combinedInput];
-      
-      // Step 8: Calculate ETH value for native token swaps
+
+      // Calculate ETH value for native token swaps
       let ethValue = BigInt(0);
       if (isNativeToken(tokenIn.address)) {
         ethValue = amountInWei;
+        console.log('💰 Native token swap - ETH value:', ethValue.toString());
       }
 
-      // Step 9: Execute the swap with proper 3-parameter structure
+      console.log('📤 Executing swap transaction...');
+      
+      // ✅ Use walletClient for sending transaction
       const hash = await walletClient.sendTransaction({
         to: universalRouterAddress as `0x${string}`,
         data: encodeFunctionData({
@@ -405,22 +571,24 @@ export function useV4Swap() {
         chain: getChainFromId(chainId),
       });
 
-      // Wait for transaction receipt
+      console.log('⏳ Waiting for transaction receipt...', hash);
+      
+      // ✅ Use publicClient to wait for receipt
       const receipt = await publicClient.waitForTransactionReceipt({ 
         hash,
         timeout: 120_000,
       });
 
       if (receipt.status === 'success') {
+        console.log('✅ Swap successful!', hash);
         return { success: true, txHash: hash };
       } else {
         return { success: false, error: 'Transaction reverted' };
       }
 
     } catch (error: any) {
-      console.error('Swap execution error:', error);
+      console.error('❌ Swap execution error:', error);
       
-      // Check if it's a user rejection error
       const errorMessage = error.message || error.toString();
       if (
         errorMessage.includes('User denied') ||
@@ -435,143 +603,9 @@ export function useV4Swap() {
         return { success: false, error: errorMessage };
       }
     }
-  };
+  }, [isConnected, walletClient, publicClient, chainId, approveTokenToPermit2, getChainFromId, address]);
 
-  
-
-  // Robust fetchQuote implementation
-  const fetchQuote = async ({
-    tokenIn,
-    tokenOut,
-    amountIn,
-    poolKey,
-    ticks,
-  }: {
-    tokenIn: Token;
-    tokenOut: Token;
-    amountIn: string;
-    poolKey: PoolKey;
-    ticks: any[];
-  }): Promise<string | null> => {
-    try {
-      if (!tokenIn || !tokenOut || !amountIn || !poolKey || !chainId) return null;
-      const provider = walletClient?.transport?.provider || publicClient;
-      if (!provider) return null;
-  
-      const { getPoolInfo, generatePoolId } = await import('../utils/stateViewUtils');
-      const poolId = generatePoolId(poolKey);
-      const poolInfo = await getPoolInfo(chainId, provider, poolId);
-  
-      if (!poolInfo || !poolInfo.sqrtPriceX96 || poolInfo.tick === undefined) return null;
-      if (typeof tokenIn.decimals !== 'number' || typeof tokenOut.decimals !== 'number') return null;
-  
-      const currency0 = new SDKToken(chainId, poolKey.currency0, tokenIn.decimals, tokenIn.symbol);
-      const currency1 = new SDKToken(chainId, poolKey.currency1, tokenOut.decimals, tokenOut.symbol);
-  
-      const zeroForOne = poolKey.currency0.toLowerCase() === tokenIn.address.toLowerCase();
-  
-      // Try using Uniswap SDK first
-      try {
-        const pool = new Pool(
-          currency0,
-          currency1,
-          poolKey.fee,
-          poolKey.tickSpacing,
-          poolKey.hooks,
-          poolInfo.sqrtPriceX96,
-          poolInfo.liquidity,
-          poolInfo.tick,
-          ticks
-        );
-  
-        const amountInParsed = CurrencyAmount.fromRawAmount(
-          zeroForOne ? currency0 : currency1,
-          parseUnits(amountIn, tokenIn.decimals).toString()
-        );
-  
-        const result: any = pool.getOutputAmount(amountInParsed, zeroForOne);
-        const amountOut = result?.amountOut;
-        if (amountOut) {
-          return amountOut.toSignificant(6);
-        }
-      } catch (sdkError) {
-        console.warn('[fetchQuote] SDK pool failed — trying fallback', sdkError);
-      }
-  
-      // 🔁 Fallback: use sqrtPriceX96 directly
-      const fallbackAmountOut = getQuoteFromSqrtPriceX96(
-        amountIn,
-        BigInt(poolInfo.sqrtPriceX96),
-        tokenIn.decimals,
-        tokenOut.decimals,
-        zeroForOne // tokenInIsToken0
-      );
-  
-      return fallbackAmountOut;
-  
-    } catch (e) {
-      console.error('[fetchQuote] Quote error:', e);
-      return null;
-    }
-  };
-  
-  // State management for the swap form
-  const [swapState, setSwapState] = useState<SwapState>({
-    tokenIn: null,
-    tokenOut: null,
-    amountIn: '',
-    amountOut: '',
-    poolKey: null,
-    slippageTolerance: 50, // 0.5%
-    deadline: Math.floor(Date.now() / 1000) + 1800 // 30 minutes
-  });
-
-  const [validation, setValidation] = useState<SwapValidation>({});
-  const [isSwapping, setIsSwapping] = useState(false);
-  const [isValidatingPool, setIsValidatingPool] = useState(false);
-  const [poolInfo, setPoolInfo] = useState<PoolInfo | null>(null);
-
-  // Update functions
-  const updateTokenIn = (token: Token | null) => {
-    setSwapState(prev => ({ ...prev, tokenIn: token }));
-  };
-
-  const updateTokenOut = (token: Token | null) => {
-    setSwapState(prev => ({ ...prev, tokenOut: token }));
-  };
-
-  const updateAmountIn = (amount: string) => {
-    setSwapState(prev => ({ ...prev, amountIn: amount }));
-  };
-
-  const updatePoolId = (poolKeyStr: string) => {
-    try {
-      const poolKey = poolKeyStr ? JSON.parse(poolKeyStr) : null;
-      setSwapState(prev => ({ ...prev, poolKey }));
-    } catch (error) {
-      setSwapState(prev => ({ ...prev, poolKey: null }));
-    }
-  };
-
-  const updateSlippageTolerance = (tolerance: number) => {
-    setSwapState(prev => ({ ...prev, slippageTolerance: tolerance }));
-  };
-
-  const updateDeadline = (deadline: number) => {
-    setSwapState(prev => ({ ...prev, deadline }));
-  };
-
-  const swapTokens = () => {
-    setSwapState(prev => ({
-      ...prev,
-      tokenIn: prev.tokenOut,
-      tokenOut: prev.tokenIn,
-      amountIn: '',
-      amountOut: ''
-    }));
-  };
-
-  const validateSwap = (): boolean => {
+  const validateSwap = useCallback((): boolean => {
     const newValidation: SwapValidation = {};
     
     if (!swapState.tokenIn) {
@@ -593,10 +627,9 @@ export function useV4Swap() {
     setValidation(newValidation);
     
     return Object.keys(newValidation).length === 0;
-  };
+  }, [swapState]);
 
-  // Main execute swap function that matches your component
-  const executeSwapFromState = async (): Promise<SwapResult> => {
+  const executeSwapFromState = useCallback(async (): Promise<SwapResult> => {
     if (!isConnected || !walletClient || !publicClient || !chainId) {
       return { success: false, error: 'Wallet not connected' };
     }
@@ -623,7 +656,7 @@ export function useV4Swap() {
     } finally {
       setIsSwapping(false);
     }
-  };
+  }, [isConnected, walletClient, publicClient, chainId, swapState, executeSwap, address]);
 
   return {
     // State
@@ -646,28 +679,16 @@ export function useV4Swap() {
     validateSwap,
     executeSwap: executeSwapFromState,
     
+    // Utility functions
+    fetchQuote,
+    isNativeToken,
+    normalizeTokenAddress,
+    normalizePoolKey,
+    orderPoolTokens,
+    getChainFromId,
+    
     // Permit2 functions
     approveTokenToPermit2,
     checkPermit2Allowance,
-    signPermit2Batch,
-    
-    // Core swap function (for direct use)
-    executeSwapDirect: executeSwap,
-    
-    // Utility functions
-    isNativeToken,
-    getChainFromId,
-    fetchQuote,
   };
-}
-
-// Minimal tick data provider for Uniswap v4 simulation
-class MinimalTickDataProvider {
-  getTick(tick) {
-    return { index: tick, liquidityNet: 0, liquidityGross: 0 };
-  }
-  nextInitializedTickWithinOneWord(tick, lte, tickSpacing) {
-    // Return the current tick as initialized
-    return { index: tick, initialized: true };
-  }
 }

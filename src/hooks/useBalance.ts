@@ -1,101 +1,159 @@
-import { useState, useEffect } from 'react'
-import { useAccount, usePublicClient } from 'wagmi'
-import { formatUnits } from 'viem'
-import { useDebounce } from 'use-debounce'
-import { createPublicClient, custom } from 'viem';
+import { useState, useEffect } from 'react';
+import { formatUnits, getAddress } from 'viem';
+import { ERC20_ABI } from '../../contracts/ERC20_ABI';
 
-const ERC20_ABI = [
-  {
-    constant: true,
-    inputs: [{ name: 'account', type: 'address' }],
-    name: 'balanceOf',
-    outputs: [{ name: '', type: 'uint256' }],
-    type: 'function',
-  },
-  {
-    constant: true,
-    inputs: [],
-    name: 'decimals',
-    outputs: [{ name: '', type: 'uint8' }],
-    type: 'function',
-  },
-] as const
+// Enhanced native token detection
+const isNativeToken = (tokenAddress: string): boolean => {
+  if (!tokenAddress) return false;
+  const addr = tokenAddress.toLowerCase();
+  return addr === '0x0000000000000000000000000000000000000000' ||
+         addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' ||
+         addr === 'eth' ||
+         addr === '0xeee';
+};
 
-// Helper to strip chainId prefix from token addresses (e.g., '56_0xabc...' -> '0xabc...')
-function cleanAddress(address?: string): string | undefined {
-  if (!address) return address;
-  if (address.includes('_')) return address.split('_')[1];
-  return address;
-}
+// Normalize token address
+const normalizeTokenAddress = (tokenAddress: string): string => {
+  if (!tokenAddress) return '0x0000000000000000000000000000000000000000';
+  
+  if (isNativeToken(tokenAddress)) {
+    return '0x0000000000000000000000000000000000000000';
+  }
+  
+  try {
+    return getAddress(tokenAddress);
+  } catch {
+    return tokenAddress;
+  }
+};
 
-export function useBalance(tokenAddress?: string, chainId?: number, provider?: any) {
-
-  const [debouncedAddress] = useDebounce(tokenAddress, 500);
-  const cleanTokenAddress = cleanAddress(debouncedAddress);
-  const [balance, setBalance] = useState<string>('')
-  const { address } = useAccount()
-  // Use the provider if given, otherwise use wagmi's public client
-  const publicClient = provider
-    ? createPublicClient({ transport: custom(provider) })
-    : usePublicClient(chainId ? { chainId } : undefined);
+/**
+ * ✅ FIXED: Hook to get token balance using publicClient for reading and walletClient for account info
+ * @param tokenAddress Token contract address (or native token identifier)
+ * @param chainId Chain ID
+ * @param publicClient Public client for reading contracts
+ * @param walletClient Wallet client for account info
+ * @returns Token balance formatted as string
+ */
+export function useBalance(
+  tokenAddress: string | undefined,
+  chainId: number | undefined,
+  publicClient: any, // ✅ Use publicClient for reading
+  walletClient: any  // ✅ Use walletClient for account info
+) {
+  const [balance, setBalance] = useState<string>('0');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!publicClient || !address) {
-      setBalance('')
-      return
-    }
+    let cancelled = false;
 
     const fetchBalance = async () => {
+      // Reset state
+      if (!tokenAddress || !chainId || !publicClient || !walletClient?.account) {
+        setBalance('0');
+        setLoading(false);
+        setError(null);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
       try {
-        let providerInfo = provider ? provider.constructor?.name : 'undefined';
-        let providerChainId = provider && provider.chainId ? provider.chainId : 'n/a';
-        console.log('[useBalance] chainId:', chainId, '| provider:', providerInfo, '| provider.chainId:', providerChainId, '| tokenAddress:', cleanTokenAddress, '| userAddress:', address);
-        // Handle native ETH
-        if (
-          !cleanTokenAddress ||
-          cleanTokenAddress === '0x0000000000000000000000000000000000000000' ||
-          cleanTokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-        ) {
-          console.log('[useBalance] Fetching native balance for', address, 'on chain', chainId);
-          const balance = await publicClient.getBalance({
-            address: address as `0x${string}`
-          })
-          setBalance(formatUnits(balance, 18))
-          return
+        const userAddress = walletClient.account.address;
+        const normalizedAddress = normalizeTokenAddress(tokenAddress);
+
+        let balanceWei: bigint;
+        let decimals: number;
+
+        if (isNativeToken(tokenAddress)) {
+          // ✅ Get native token balance using publicClient
+          console.log('📊 Fetching native token balance for:', userAddress);
+          
+          balanceWei = await publicClient.getBalance({
+            address: userAddress,
+          });
+          decimals = 18; // Native token (ETH) has 18 decimals
+          
+          console.log('💰 Native balance (wei):', balanceWei.toString());
+        } else {
+          // ✅ Get ERC20 token balance using publicClient
+          console.log('📊 Fetching ERC20 balance for:', {
+            token: normalizedAddress,
+            user: userAddress
+          });
+
+          try {
+            // Get token decimals using publicClient
+            decimals = await publicClient.readContract({
+              address: normalizedAddress as `0x${string}`,
+              abi: ERC20_ABI,
+              functionName: 'decimals',
+            });
+
+            // Get token balance using publicClient
+            balanceWei = await publicClient.readContract({
+              address: normalizedAddress as `0x${string}`,
+              abi: ERC20_ABI,
+              functionName: 'balanceOf',
+              args: [userAddress],
+            });
+
+            console.log('💰 ERC20 balance:', {
+              token: normalizedAddress,
+              balanceWei: balanceWei.toString(),
+              decimals
+            });
+          } catch (contractError) {
+            console.error('Failed to read ERC20 contract:', contractError);
+            throw new Error('Failed to read token contract');
+          }
         }
 
-        // Handle ERC20 tokens
-        console.log('[useBalance] Fetching ERC20 balance for', cleanTokenAddress, 'for user', address, 'on chain', chainId);
-        const [balanceResult, decimalsResult] = await Promise.all([
-          publicClient.readContract({
-            address: cleanTokenAddress as `0x${string}`,
-            abi: ERC20_ABI,
-            functionName: 'balanceOf',
-            args: [address as `0x${string}`],
-          }),
-          publicClient.readContract({
-            address: cleanTokenAddress as `0x${string}`,
-            abi: ERC20_ABI,
-            functionName: 'decimals',
-          }),
-        ])
+        if (!cancelled) {
+          // Format balance to human readable format
+          const formattedBalance = formatUnits(balanceWei, decimals);
+          
+          // Round to 6 decimal places for display
+          const roundedBalance = parseFloat(formattedBalance).toFixed(6);
+          const finalBalance = parseFloat(roundedBalance).toString(); // Remove trailing zeros
+          
+          console.log('✅ Final formatted balance:', {
+            wei: balanceWei.toString(),
+            formatted: formattedBalance,
+            rounded: roundedBalance,
+            final: finalBalance
+          });
 
-        const formattedBalance = formatUnits(
-          balanceResult as bigint,
-          decimalsResult as number
-        )
-        setBalance(formattedBalance)
-      } catch (err) {
-        console.error('Error fetching balance:', err)
-        setBalance('')
+          setBalance(finalBalance);
+          setLoading(false);
+        }
+      } catch (err: any) {
+        console.error('❌ Balance fetch error:', err);
+        
+        if (!cancelled) {
+          setError(err.message || 'Failed to fetch balance');
+          setBalance('0');
+          setLoading(false);
+        }
       }
+    };
+
+    fetchBalance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tokenAddress, chainId, publicClient, walletClient]);
+
+  return {
+    balance,
+    loading,
+    error,
+    refetch: () => {
+      // Trigger a re-fetch by changing a dependency
+      setLoading(true);
     }
-
-    fetchBalance()
-    const interval = setInterval(fetchBalance, 15000) // Refresh every 15 seconds
-
-    return () => clearInterval(interval)
-  }, [publicClient, debouncedAddress, tokenAddress, address, chainId, provider])
-
-  return { balance }
+  };
 }

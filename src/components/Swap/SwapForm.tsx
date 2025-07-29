@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import styled from 'styled-components'
 import { TokenSelector } from '../CreatePool/TokenSelector'
 import { SwapSettings } from './SwapSettings'
 import { useV4Swap } from '../../hooks/useV4Swap'
-import { useAccount, useWalletClient } from 'wagmi'
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { ArrowDown } from '../shared/icons'
 import { DeployedPoolsList, addDeployedPool } from './DeployedPoolsList'
@@ -177,70 +177,6 @@ const IconBackground = styled.div`
   }
 `
 
-// Pool Key Input Section
-const PoolIdSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-`
-
-const PoolIdLabel = styled.label`
-  font-size: 14px;
-  font-weight: 500;
-  color: ${({ theme }) => theme.colors.neutral1};
-`
-
-const PoolIdInputContainer = styled.div`
-  background: ${({ theme }) => theme.colors.backgroundInteractive};
-  border-radius: 12px;
-  padding: 12px 16px;
-  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
-  
-  &:focus-within {
-    border-color: ${({ theme }) => theme.colors.accentAction};
-  }
-`
-
-const PoolKeyTextArea = styled.textarea`
-  background: none;
-  border: none;
-  color: ${({ theme }) => theme.colors.neutral1};
-  font-size: 12px;
-  outline: none;
-  width: 100%;
-  min-height: 80px;
-  resize: vertical;
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
-  
-  &::placeholder {
-    color: ${({ theme }) => theme.colors.neutral3};
-  }
-`
-
-const PoolInfoContainer = styled.div`
-  background: ${({ theme }) => theme.colors.backgroundInteractive};
-  border-radius: 8px;
-  padding: 12px;
-  margin-top: 8px;
-  border: 1px solid ${({ theme }) => theme.colors.backgroundOutline};
-`
-
-const PoolInfoTitle = styled.div`
-  font-size: 14px;
-  font-weight: 500;
-  color: ${({ theme }) => theme.colors.neutral1};
-  margin-bottom: 4px;
-`
-
-const PoolInfoDetail = styled.div`
-  font-size: 12px;
-  color: ${({ theme }) => theme.colors.neutral2};
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 2px;
-`
-
 const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary'; $disabled?: boolean }>`
   width: 100%;
   padding: 16px 20px ;
@@ -340,13 +276,6 @@ const LoadingSubtext = styled.div`
   text-align: center;
 `
 
-const ValidatingText = styled.div`
-  font-size: 12px;
-  color: ${({ theme }) => theme.colors.neutral3};
-  margin-top: 4px;
-  font-style: italic;
-`
-
 interface PoolKey {
   currency0: string;
   currency1: string;
@@ -356,24 +285,29 @@ interface PoolKey {
 }
 
 export function SwapForm() {
-  // Restore missing state hooks (must be before any usage)
+  // Basic UI state
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [sellMode, setSellMode] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'swap' | 'limit' | 'buy' | 'sell'>('swap');
-  const [selectedPoolKey, setSelectedPoolKey] = useState<PoolKey | null>(null);
-  const [poolKeyInput, setPoolKeyInput] = useState<string>('');
+  const [inputHover, setInputHover] = useState(false);
+
+  // Auto-selection tracking
   const [autoSelectedPool, setAutoSelectedPool] = useState<any>(null);
   const [quote, setQuote] = useState<string | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
-  // Add a state to control hover for the input container
-  const [inputHover, setInputHover] = useState(false);
   const [ticks, setTicks] = useState<any[]>([]);
+
+  // ✅ FIXED: Use refs to prevent infinite loops
+  const autoSelectionInProgressRef = useRef(false);
+  const lastAutoSelectionKeyRef = useRef<string>('');
 
   const { isConnected, address } = useAccount();
   const { openConnectModal } = useConnectModal()
   const { data: walletClient } = useWalletClient();
+  const publicClient = usePublicClient(); // ✅ Add publicClient for reading
+  
   const {
     swapState,
     validation,
@@ -390,249 +324,329 @@ export function SwapForm() {
     executeSwap,
     validateSwap,
     fetchQuote,
+    normalizeTokenAddress,
+    isNativeToken,
   } = useV4Swap()
   
-  // Get balances for selected tokens
+  // ✅ FIXED: Get balances using both publicClient and walletClient
   const { balance: tokenInBalance } = useBalance(
     swapState.tokenIn?.address,
     walletClient?.chain?.id ?? undefined,
-    walletClient?.transport?.provider
+    publicClient, // ✅ Use publicClient for reading
+    walletClient  // ✅ Use walletClient for account info
   );
   
   const { balance: tokenOutBalance } = useBalance(
     swapState.tokenOut?.address,
     walletClient?.chain?.id ?? undefined,
-    walletClient?.transport?.provider
+    publicClient, // ✅ Use publicClient for reading
+    walletClient  // ✅ Use walletClient for account info
   );
   
-  // Restore local allPools and poolsLoading state
+  // Pool data for auto-selection
   const [allPools, setAllPools] = useState<any[]>([]);
   const [poolsLoading, setPoolsLoading] = useState(true);
 
-  // Restore useEffect for fetching pools
+  // Fetch pools on mount
   useEffect(() => {
     setPoolsLoading(true);
     fetch(GRAPHQL_ENDPOINTS.all)
       .then(res => res.json())
       .then(data => {
+        console.log('Fetched pools:', data)
         setAllPools(data.Pool || []);
         setPoolsLoading(false);
       })
       .catch(() => setPoolsLoading(false));
   }, []);
-  console.log('allPools', allPools);
-  useEffect(() => {
-    if (allPools.length > 0) {
-      console.log('Fetched all pools:', allPools);
-    }
-  }, [allPools]);
-  // Auto-select best pool when tokens are chosen and user is on any supported network
-  useEffect(() => {
-    if (!walletClient) {
-      console.warn('walletClient not ready yet');
+
+  // ✅ FIXED: Prevent infinite loop by removing poolKey from dependencies and using refs
+  const autoSelectPool = useCallback(async () => {
+    if (!publicClient || !walletClient || autoSelectionInProgressRef.current) {
       return;
     }
+
     const chainId = walletClient.chain?.id;
-
-    console.log('walletClient:', walletClient);
-    console.log('chainId:', chainId);
-
-    if (!walletClient || !chainId) {
-      setAutoSelectedPool(null);
-      setSelectedPoolKey(null);
-      setPoolKeyInput('');
-      updatePoolId('');
-      console.warn('No wallet client or chainId available. Please connect your wallet.');
+    if (!chainId) {
+      console.warn('No chainId available');
       return;
     }
 
-    if (
-      swapState.tokenIn &&
-      swapState.tokenOut &&
-      allPools.length > 0 && !poolsLoading
-    ) {
-      (async () => {
-        const tokenInAddress = swapState.tokenIn?.address?.toLowerCase();
-        const tokenOutAddress = swapState.tokenOut?.address?.toLowerCase();
-        if (!tokenInAddress || !tokenOutAddress) return;
+    if (!swapState.tokenIn || !swapState.tokenOut || allPools.length === 0 || poolsLoading) {
+      return;
+    }
 
-        // Find all pools that match the token pair (parse after _)
-        const matchingPools = allPools.filter(pool => {
-          const poolToken0 = pool.token0.split('_')[1]?.toLowerCase();
-          const poolToken1 = pool.token1.split('_')[1]?.toLowerCase();
-          return (
-            (poolToken0 === tokenInAddress && poolToken1 === tokenOutAddress) ||
-            (poolToken0 === tokenOutAddress && poolToken1 === tokenInAddress)
-          );
-        });
+    // Create a key to track if this combination was already processed
+    const selectionKey = `${swapState.tokenIn.address}-${swapState.tokenOut.address}-${chainId}`;
+    if (lastAutoSelectionKeyRef.current === selectionKey) {
+      return; // Already processed this combination
+    }
 
-        if (matchingPools.length === 0) {
-          setAutoSelectedPool(null);
-          setSelectedPoolKey(null);
-          setPoolKeyInput('');
-          updatePoolId('');
-          return;
+    autoSelectionInProgressRef.current = true;
+    lastAutoSelectionKeyRef.current = selectionKey;
+
+    try {
+      console.log('🔍 Starting auto pool selection for tokens:', {
+        tokenIn: swapState.tokenIn.symbol,
+        tokenOut: swapState.tokenOut.symbol,
+        tokenInAddr: swapState.tokenIn.address,
+        tokenOutAddr: swapState.tokenOut.address
+      });
+
+      const tokenInAddress = normalizeTokenAddress(swapState.tokenIn.address).toLowerCase();
+      const tokenOutAddress = normalizeTokenAddress(swapState.tokenOut.address).toLowerCase();
+
+      console.log('🔧 Normalized addresses:', {
+        tokenInAddress,
+        tokenOutAddress,
+        tokenInIsNative: isNativeToken(swapState.tokenIn.address),
+        tokenOutIsNative: isNativeToken(swapState.tokenOut.address)
+      });
+
+      if (!tokenInAddress || !tokenOutAddress) return;
+
+      const matchingPools = allPools.filter(pool => {
+        const poolToken0 = pool.token0.split('_')[1]?.toLowerCase();
+        const poolToken1 = pool.token1.split('_')[1]?.toLowerCase();
+
+        const matches = (
+          (poolToken0 === tokenInAddress && poolToken1 === tokenOutAddress) ||
+          (poolToken0 === tokenOutAddress && poolToken1 === tokenInAddress)
+        );
+
+        if (matches) {
+          console.log('🎯 Found matching pool:', {
+            poolToken0,
+            poolToken1,
+            fee: pool.feeTier,
+            liquidity: pool.totalValueLockedToken0,
+            pool
+          });
         }
 
-        const { generatePoolId, getPoolInfo } = await import('../../utils/stateViewUtils');
-        const { convertPoolToPoolKey } = await import('../../utils/poolSelectionUtils');
+        return matches;
+      });
 
-        // Use walletClient as the viem client
-        const client = walletClient;
+      console.log(`📊 Found ${matchingPools.length} matching pools`);
 
-        const poolsWithLiquidity = await Promise.all(
-          matchingPools.map(async (pool) => {
+      if (matchingPools.length === 0) {
+        console.log('❌ No matching pools found');
+        setAutoSelectedPool(null);
+        updatePoolId('');
+        return;
+      }
+
+      const { generatePoolId, getPoolInfo } = await import('../../utils/stateViewUtils');
+      const { convertPoolToPoolKey } = await import('../../utils/poolSelectionUtils');
+
+      const poolsWithLiquidity = await Promise.all(
+        matchingPools.map(async (pool) => {
+          try {
             const poolKey = convertPoolToPoolKey(pool);
             const poolId = generatePoolId(poolKey);
             let liquidity = 0n;
+
             try {
-              const info = await getPoolInfo(chainId, client, poolId);
-              liquidity = BigInt(info.liquidity || '0');
-            } catch {}
-            return { pool, fee: typeof pool.feeTier === 'string' ? parseInt(pool.feeTier) : pool.feeTier, liquidity };
-          })
-        );
+              // ✅ Use publicClient for reading pool info
+              const info = await getPoolInfo(chainId, publicClient, poolId);
+              liquidity = BigInt(info?.liquidity || '0');
+            } catch (e) {
+              console.warn('Failed to get pool info for:', poolId, e);
+            }
 
-        // Sort by liquidity descending only (BigInt comparison)
-        poolsWithLiquidity.sort((a, b) => (b.liquidity > a.liquidity ? 1 : b.liquidity < a.liquidity ? -1 : 0));
+            return {
+              pool,
+              poolKey,
+              fee: typeof pool.feeTier === 'string' ? parseInt(pool.feeTier) : pool.feeTier,
+              liquidity
+            };
+          } catch (e) {
+            console.warn('Failed to process pool:', pool, e);
+            return null;
+          }
+        })
+      );
 
-        // Only consider pools with non-zero liquidity and both tokens present
-        const MIN_TOKEN_AMOUNT = 1;
-        const usablePools = poolsWithLiquidity.filter(p => {
-          const pool = p.pool;
-          return (
-            BigInt(p.liquidity) > 0n &&
-            Number(pool.totalValueLockedToken0) > MIN_TOKEN_AMOUNT &&
-            Number(pool.totalValueLockedToken1) > MIN_TOKEN_AMOUNT
-          );
+      const validPools = poolsWithLiquidity
+        .filter(p => p !== null)
+        .sort((a, b) => {
+          if (a.liquidity > b.liquidity) return -1;
+          if (a.liquidity < b.liquidity) return 1;
+          return 0;
         });
 
-        // Sort usable pools by liquidity descending
-        usablePools.sort((a, b) => (b.liquidity > a.liquidity ? 1 : b.liquidity < a.liquidity ? -1 : 0));
+      console.log('💰 Valid pools sorted by liquidity:', validPools.map(p => ({
+        fee: p.fee,
+        liquidity: p.liquidity.toString(),
+        tvl0: p.pool.totalValueLockedToken0,
+        tvl1: p.pool.totalValueLockedToken1
+      })));
 
-        // Pick the most liquid usable pool
-        let bestPool = usablePools[0]?.pool;
-        console.log('Best pool:', bestPool);
-        // If none found, fall back to the most liquid pool overall
-        if (!bestPool && poolsWithLiquidity.length > 0) {
-          bestPool = poolsWithLiquidity[0].pool;
-        }
+      const MIN_TOKEN_AMOUNT = 1;
+      const usablePools = validPools.filter(p => {
+        return (
+          p.liquidity > 0n &&
+          Number(p.pool.totalValueLockedToken0) > MIN_TOKEN_AMOUNT &&
+          Number(p.pool.totalValueLockedToken1) > MIN_TOKEN_AMOUNT
+        );
+      });
 
-        if (bestPool) {
-          const poolKey = convertPoolToPoolKey(bestPool);
-          setAutoSelectedPool(bestPool);
-          setSelectedPoolKey(poolKey);
-          setPoolKeyInput(JSON.stringify(poolKey, null, 2));
-          updatePoolId(JSON.stringify(poolKey));
-          console.log('Auto-selected pool:', bestPool);
-          console.log('Pool key:', JSON.stringify(poolKey, null, 2));
-        } else {
-          setAutoSelectedPool(null);
-          setSelectedPoolKey(null);
-          setPoolKeyInput('');
-          updatePoolId('');
-        }
-      })();
+      console.log(`✅ ${usablePools.length} usable pools found`);
+
+      let bestPoolData = usablePools[0];
+
+      if (!bestPoolData && validPools.length > 0) {
+        bestPoolData = validPools[0];
+        console.log('⚠️ Using fallback pool with low TVL');
+      }
+
+      if (bestPoolData) {
+        const bestPool = bestPoolData.pool;
+        const poolKey = bestPoolData.poolKey;
+
+        console.log('🚀 Auto-selected best pool:', {
+          fee: (bestPoolData.fee / 10000).toFixed(2) + '%',
+          liquidity: bestPoolData.liquidity.toString(),
+          poolKey
+        });
+
+        updatePoolId(JSON.stringify(poolKey));
+        setAutoSelectedPool(bestPool);
+      } else {
+        setAutoSelectedPool(null);
+        updatePoolId('');
+      }
+    } catch (error) {
+      console.error('Auto selection error:', error);
+    } finally {
+      autoSelectionInProgressRef.current = false;
     }
-  }, [swapState.tokenIn, swapState.tokenOut, allPools, poolsLoading, walletClient]);
-  
-  // Fetch ticks when selectedPoolKey changes
+  }, [swapState.tokenIn, swapState.tokenOut, allPools, poolsLoading, publicClient, walletClient, updatePoolId, normalizeTokenAddress, isNativeToken]);
+
+  // ✅ FIXED: Separate effect for auto selection without poolKey dependency
+  useEffect(() => {
+    if (swapState.tokenIn && swapState.tokenOut) {
+      autoSelectPool();
+    } else {
+      setAutoSelectedPool(null);
+      lastAutoSelectionKeyRef.current = '';
+    }
+  }, [autoSelectPool]);
+
+  // Fetch ticks when pool changes
   useEffect(() => {
     async function fetchTicks() {
-      if (!selectedPoolKey) {
+      if (!swapState.poolKey) {
         setTicks([]);
         return;
       }
+      
       try {
-        // Use the pool id string (you may need to adjust this depending on your subgraph schema)
-        const poolId = JSON.stringify(selectedPoolKey);
+        const poolId = JSON.stringify(swapState.poolKey);
         const res = await fetch(GRAPHQL_ENDPOINTS.allPools, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query: `
-query Tick {
-  Tick {
-    chainId
-    createdAtBlockNumber
-    createdAtTimestamp
-    db_write_timestamp
-    id
-    liquidityGross
-    liquidityNet
-    pool_id
-    price0
-    price1
-    tickIdx
-  }
-}
+              query Tick {
+                Tick {
+                  chainId
+                  createdAtBlockNumber
+                  createdAtTimestamp
+                  db_write_timestamp
+                  id
+                  liquidityGross
+                  liquidityNet
+                  pool_id
+                  price0
+                  price1
+                  tickIdx
+                }
+              }
             `,
           }),
         });
         const data = await res.json();
-        console.log(data , 'data')
+        console.log('📊 Fetched ticks:', data);
         setTicks(data.data?.Tick || []);
       } catch (e) {
+        console.warn('Failed to fetch ticks:', e);
         setTicks([]);
       }
     }
     fetchTicks();
-  }, [selectedPoolKey]);
+  }, [swapState.poolKey]);
 
   // Fetch quote when input changes
   useEffect(() => {
-  let cancelled = false;
+    let cancelled = false;
 
-  async function getQuote() {
-    const { tokenIn, tokenOut, amountIn } = swapState;
+    async function getQuote() {
+      const { tokenIn, tokenOut, amountIn, poolKey } = swapState;
 
-    // If any required field is missing, reset state
-    if (!tokenIn || !tokenOut || !amountIn || !selectedPoolKey || ticks.length === 0) {
+      if (!tokenIn || !tokenOut || !amountIn || !poolKey) {
+        setQuote(null);
+        setQuoteError(null);
+        setQuoteLoading(false);
+        return;
+      }
+
+      if (parseFloat(amountIn) <= 0) {
+        setQuote(null);
+        setQuoteError(null);
+        setQuoteLoading(false);
+        return;
+      }
+
+      setQuoteLoading(true);
       setQuote(null);
       setQuoteError(null);
-      return;
-    }
 
-    setQuoteLoading(true);
-    setQuote(null);
-    setQuoteError(null);
+      try {
+        console.log('💱 Fetching quote for:', {
+          tokenIn: tokenIn.symbol,
+          tokenOut: tokenOut.symbol,
+          amountIn,
+          ticksLength: ticks.length
+        });
 
-    try {
-      const result = await fetchQuote({
-        tokenIn,
-        tokenOut,
-        amountIn,
-        poolKey: selectedPoolKey,
-        ticks,
-      });
+        const result = await fetchQuote({
+          tokenIn,
+          tokenOut,
+          amountIn,
+          poolKey,
+          ticks,
+        });
 
-      if (!cancelled) {
-        setQuote(result);
-        if (!result || Number(result) === 0) {
-          setQuoteError('No quote available for this amount/pool.');
-        } else {
-          setQuoteError(null);
+        if (!cancelled) {
+          if (result && Number(result) > 0) {
+            setQuote(result);
+            setQuoteError(null);
+            console.log('✅ Quote fetched:', result);
+          } else {
+            setQuote(null);
+            setQuoteError('No quote available for this amount/pool.');
+          }
+        }
+      } catch (e) {
+        console.error('[SwapForm] Quote fetch failed:', e);
+        if (!cancelled) {
+          setQuoteError('Failed to fetch quote.');
+          setQuote(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setQuoteLoading(false);
         }
       }
-    } catch (e) {
-      console.error('[SwapForm] Quote fetch failed:', e);
-      if (!cancelled) {
-        setQuoteError('Failed to fetch quote.');
-        setQuote(null);
-      }
-    } finally {
-      if (!cancelled) {
-        setQuoteLoading(false);
-      }
     }
-  }
 
-  getQuote();
+    getQuote();
 
-  return () => {
-    cancelled = true;
-  };
-}, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, selectedPoolKey, ticks]);
+    return () => {
+      cancelled = true;
+    };
+  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, swapState.poolKey, ticks, fetchQuote]);
 
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
@@ -651,32 +665,15 @@ query Tick {
       
       if (!result.success) {
         setError(result.error || 'Swap failed');
-        console.log(result)
+        console.log('❌ Swap failed:', result);
       } else if (result.txHash) {
         const shortHash = `${result.txHash.slice(0, 10)}...${result.txHash.slice(-8)}`;
         setSuccessMessage(`Swap successful! Tx: ${shortHash}`);
         updateAmountIn('');
-        
-        // If we have pool info and a successful swap, add to deployed pools
-        if (poolInfo && selectedPoolKey) {
-          const networkId = walletClient?.chain?.id ?? 1;
-          const networkName = walletClient?.chain?.name ?? 'Ethereum';
-          const newPool = {
-            poolId: JSON.stringify(selectedPoolKey),
-            token0Symbol: poolInfo.token0Symbol,
-            token1Symbol: poolInfo.token1Symbol,
-            fee: poolInfo.fee,
-            networkId,
-            networkName,
-            timestamp: Date.now()
-          };
-          addDeployedPool(JSON.stringify(newPool));
-          console.log(newPool)
-        }
+        console.log('✅ Swap successful:', result.txHash);
       }
     } catch (error: any) {
       console.error('Swap execution error:', error);
-      // Check if it's a user rejection error
       const errorMessage = error.message || error.toString();
       if (
         errorMessage.includes('User denied') ||
@@ -694,7 +691,7 @@ query Tick {
   }
   
   const getButtonText = () => {
-    if (!selectedPoolKey) return 'Enter/Select Pool Key';
+    if (!swapState.poolKey) return 'Finding Pool...';
     if (isValidatingPool) return 'Validating Pool...';
     if (!swapState.tokenIn) return 'Select input token';
     if (!swapState.tokenOut) return 'Select output token';
@@ -707,7 +704,7 @@ query Tick {
   const isButtonDisabled = () => {
     return (
       !isConnected ||
-      !selectedPoolKey ||
+      !swapState.poolKey ||
       isValidatingPool ||
       !swapState.tokenIn ||
       !swapState.tokenOut ||
@@ -715,75 +712,12 @@ query Tick {
       isSwapping
     );
   }
-
-  const handlePoolDeployed = (pool: {
-    address: string;
-    token0: { address: string; symbol: string; name: string; decimals: number; };
-    token1: { address: string; symbol: string; name: string; decimals: number; };
-    fee: number;
-    hookAddress: string;
-  }) => {
-    // Generate poolId as needed
-    const poolId = JSON.stringify({
-      currency0: pool.token0.address,
-      currency1: pool.token1.address,
-      fee: pool.fee,
-      tickSpacing: 60, // Set appropriately if you have this info elsewhere
-      hooks: pool.hookAddress,
-    });
-
-    // Clear auto-selected pool when deploying new pool
-    setAutoSelectedPool(null);
-    updatePoolId(poolId);
-    updateTokenIn(pool.token0);
-    updateTokenOut(pool.token1);
-
-    // Add to deployed pools
-    const networkId = walletClient?.chain?.id ?? 1;
-    const networkName = walletClient?.chain?.name ?? 'Ethereum';
-    const newPool = {
-      poolId,
-      token0Symbol: pool.token0.symbol,
-      token1Symbol: pool.token1.symbol,
-      fee: pool.fee,
-      networkId,
-      networkName,
-      timestamp: Date.now()
-    };
-    addDeployedPool(JSON.stringify(newPool));
-  }
-  
-  // Handle pool selection from the deployed pools list
-  const handleSelectPool = (poolKey: PoolKey | string) => {
-    let parsedPoolKey: PoolKey;
-    let poolKeyString: string;
-    
-    if (typeof poolKey === 'string') {
-      try {
-        parsedPoolKey = JSON.parse(poolKey);
-        poolKeyString = poolKey;
-      } catch {
-        console.error('Invalid pool key format');
-        return;
-      }
-    } else {
-      parsedPoolKey = poolKey;
-      poolKeyString = JSON.stringify(poolKey, null, 2);
-    }
-    
-    // Clear auto-selected pool when manually selecting
-    setAutoSelectedPool(null);
-    setSelectedPoolKey(parsedPoolKey);
-    setPoolKeyInput(poolKeyString);
-    updatePoolId(poolKeyString);
-  };
   
   // Clear messages when inputs change
   useEffect(() => {
     setError(null);
     setSuccessMessage(null);
-  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn, selectedPoolKey]);
-  
+  }, [swapState.tokenIn, swapState.tokenOut, swapState.amountIn]);
 
   return (
     <Container>
@@ -803,82 +737,21 @@ query Tick {
             />
           </SwapHeader>
 
-          {/* Pool Key Input Section (hidden UI, logic preserved) */}
-          <div style={{ display: 'none' }}>
-            <PoolIdSection>
-              <PoolIdLabel>Pool Key</PoolIdLabel>
-              <PoolIdInputContainer>
-                <PoolKeyTextArea
-                  placeholder='Paste pool key JSON here:{"currency0":"0x...","currency1":"0x...","fee":3000,"tickSpacing":60,"hooks":"0x0000..."}'
-                  value={poolKeyInput}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setPoolKeyInput(value);
-                    setAutoSelectedPool(null);
-                    if (value.trim() === '') {
-                      setSelectedPoolKey(null);
-                      updatePoolId('');
-                      return;
-                    }
-                    try {
-                      const parsedPoolKey = JSON.parse(value);
-                      if (parsedPoolKey.currency0 && parsedPoolKey.currency1 && typeof parsedPoolKey.fee === 'number' && typeof parsedPoolKey.tickSpacing === 'number') {
-                        setSelectedPoolKey(parsedPoolKey);
-                        updatePoolId(value);
-                        console.log('Valid pool key set:', parsedPoolKey);
-                      } else {
-                        console.log('Invalid pool key structure:', parsedPoolKey);
-                        setSelectedPoolKey(null);
-                      }
-                    } catch (error) {
-                      console.log('JSON parse error:', error);
-                      setSelectedPoolKey(null);
-                    }
-                  }}
-                />
-              </PoolIdInputContainer>
-              {selectedPoolKey && (
-                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                  ✓ Valid Pool: {selectedPoolKey.currency0.slice(0, 6)}...{selectedPoolKey.currency0.slice(-4)} / {selectedPoolKey.currency1.slice(0, 6)}...{selectedPoolKey.currency1.slice(-4)} | Fee: {(selectedPoolKey.fee / 10000).toFixed(2)}%
-                </div>
-              )}
-              {autoSelectedPool && (
-                <div style={{ fontSize: '12px', color: '#4CAF50', marginTop: '4px', padding: '4px 8px', backgroundColor: '#4CAF5020', borderRadius: '4px', border: '1px solid #4CAF5040' }}>
-                  🚀 Auto-selected Pool: {autoSelectedPool.currency0?.slice(0, 6)}.../{autoSelectedPool.currency1?.slice(0, 6)}... | Fee: {((typeof autoSelectedPool.fee === 'string' ? parseInt(autoSelectedPool.fee) : autoSelectedPool.fee) / 10000).toFixed(2)}%
-                </div>
-              )}
-              {isValidatingPool && (
-                <ValidatingText>Validating pool...</ValidatingText>
-              )}
-              {poolInfo && selectedPoolKey && (
-                <PoolInfoContainer>
-                  <PoolInfoTitle>
-                    {poolInfo.token0Symbol}/{poolInfo.token1Symbol} Pool
-                  </PoolInfoTitle>
-                  <PoolInfoDetail>
-                    <span>Fee:</span>
-                    <span>{(poolInfo.fee / 10000).toFixed(2)}%</span>
-                  </PoolInfoDetail>
-                  <PoolInfoDetail>
-                    <span>Liquidity:</span>
-                    <span>{poolInfo.liquidity}</span>
-                  </PoolInfoDetail>
-                  <PoolInfoDetail>
-                    <span>Current Tick:</span>
-                    <span>{poolInfo.tick}</span>
-                  </PoolInfoDetail>
-                </PoolInfoContainer>
-              )}
-              {validation.poolIdError && (
-                <ErrorMessage>{validation.poolIdError}</ErrorMessage>
-              )}
-              {poolsLoading && (
-                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>
-                  🔄 Loading pools...
-                </div>
-              )}
-            </PoolIdSection>
-          </div>
+          {/* Pool selection status */}
+          {swapState.poolKey && (
+            <div style={{ 
+              fontSize: '12px', 
+              color: '#4CAF50', 
+              marginTop: '8px', 
+              padding: '8px', 
+              backgroundColor: '#4CAF5020', 
+              borderRadius: '8px',
+              border: '1px solid #4CAF5040'
+            }}>
+              🚀 Pool Selected: {swapState.poolKey.currency0.slice(0, 6)}.../{swapState.poolKey.currency1.slice(0, 6)}... | Fee: {(swapState.poolKey.fee / 10000).toFixed(2)}%
+              {autoSelectedPool && <span> (Auto-Selected)</span>}
+            </div>
+          )}
           
           {/* Input (From) section */}
           <InputContainer
@@ -890,7 +763,8 @@ query Tick {
                activeTab === 'limit' ? 'From' :
                activeTab === 'buy' ? 'You pay' : 'You sell'}
             </InputHeader>
-            {/* Quick-select percentage buttons, right-aligned, only on hover */}
+            
+            {/* ✅ FIXED: Quick-select percentage buttons - now properly checking balance */}
             {swapState.tokenIn && tokenInBalance && parseFloat(tokenInBalance) > 0 && inputHover && (
               <div style={{
                 display: 'flex',
@@ -928,6 +802,7 @@ query Tick {
                 ))}
               </div>
             )}
+            
             <InputRow>
               <AmountInput
                 placeholder="0"
@@ -940,9 +815,11 @@ query Tick {
                 error={validation.tokenInError}
               />
             </InputRow>
+            
+            {/* ✅ FIXED: Balance display - now properly showing when balance exists */}
             {swapState.tokenIn && tokenInBalance && parseFloat(tokenInBalance) > 0 && (
               <TokenBalance>
-                {tokenInBalance} {swapState.tokenIn.symbol}
+                Balance: <BalanceAmount>{tokenInBalance} {swapState.tokenIn.symbol}</BalanceAmount>
               </TokenBalance>
             )}
           </InputContainer>
@@ -961,10 +838,11 @@ query Tick {
                activeTab === 'limit' ? 'To' :
                activeTab === 'buy' ? 'You receive' : 'You buy'}
             </InputHeader>
+            
             <InputRow>
               <AmountInput
                 placeholder="0"
-                value={swapState.amountOut}
+                value={quote || ''}
                 readOnly
               />
               <TokenSelector
@@ -973,7 +851,8 @@ query Tick {
                 error={validation.tokenOutError}
               />
             </InputRow>
-            {/* Show the quote below the output input */}
+            
+            {/* Quote status */}
             {quoteLoading && (
               <USDValue>Loading quote...</USDValue>
             )}
@@ -982,38 +861,38 @@ query Tick {
             )}
             {quote && !quoteLoading && !quoteError && (
               <USDValue>
-                Estimated Output: {quote} {swapState.tokenOut?.symbol}
+                Estimated: {quote} {swapState.tokenOut?.symbol}
               </USDValue>
             )}
+            
+            {/* ✅ FIXED: Output token balance display */}
             {swapState.tokenOut && tokenOutBalance && parseFloat(tokenOutBalance) > 0 && (
               <TokenBalance>
-                {tokenOutBalance} {swapState.tokenOut.symbol}
+                Balance: <BalanceAmount>{tokenOutBalance} {swapState.tokenOut.symbol}</BalanceAmount>
               </TokenBalance>
             )}
           </InputContainer>
 
+          {/* Swap Button */}
           {isConnected ? (
             <ActionButton
               onClick={handleSwapButtonClick}
               $disabled={isButtonDisabled()}
               disabled={isButtonDisabled()}
             >
-              Swap
+              {getButtonText()}
             </ActionButton>
           ) : (
             <ConnectWalletButton onClick={openConnectModal}>
               Connect Wallet
             </ConnectWalletButton>
           )}
+          
           {error && <ErrorMessage>{error}</ErrorMessage>}
           {successMessage && <SuccessMessage>{successMessage}</SuccessMessage>}
         </SwapContainer>
       </MainContent>
       
-      {/* Deployed Pools List (hidden UI, logic preserved) */}
-      <div style={{ display: 'none' }}>
-        <DeployedPoolsList onSelectPool={handleSelectPool} />
-      </div>
       {/* Loading Overlay */}
       {isSwapping && (
         <LoadingOverlay>
