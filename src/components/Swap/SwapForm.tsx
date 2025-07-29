@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import styled from 'styled-components'
 import { TokenSelector } from '../CreatePool/TokenSelector'
 import { SwapSettings } from './SwapSettings'
@@ -420,6 +420,11 @@ export function SwapForm() {
       console.log('Fetched all pools:', allPools);
     }
   }, [allPools]);
+
+  // Add memoized token addresses to break the circular dependency
+  const tokenInAddress = useMemo(() => swapState.tokenIn?.address?.toLowerCase(), [swapState.tokenIn?.address]);
+  const tokenOutAddress = useMemo(() => swapState.tokenOut?.address?.toLowerCase(), [swapState.tokenOut?.address]);
+
   // Auto-select best pool when tokens are chosen and user is on any supported network
   useEffect(() => {
     if (!walletClient) {
@@ -441,13 +446,11 @@ export function SwapForm() {
     }
 
     if (
-      swapState.tokenIn &&
-      swapState.tokenOut &&
+      tokenInAddress &&
+      tokenOutAddress &&
       allPools.length > 0 && !poolsLoading
     ) {
       (async () => {
-        const tokenInAddress = swapState.tokenIn?.address?.toLowerCase();
-        const tokenOutAddress = swapState.tokenOut?.address?.toLowerCase();
         if (!tokenInAddress || !tokenOutAddress) return;
 
         // Find all pools that match the token pair (parse after _)
@@ -528,7 +531,7 @@ export function SwapForm() {
         }
       })();
     }
-  }, [swapState.tokenIn, swapState.tokenOut, allPools, poolsLoading, walletClient]);
+  }, [tokenInAddress, tokenOutAddress, allPools, poolsLoading, walletClient, updatePoolId]);
   
   const handleSwapButtonClick = async () => {
     if (!isConnected) {
