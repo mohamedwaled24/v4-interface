@@ -1,0 +1,10 @@
+{
+  "buildCommand": "yarn install && yarn build",
+  "installCommand": "yarn install",
+  "framework": "vite",
+  "functions": {
+    "app/api/hello.js": {
+      "runtime": "nodejs18.x"
+    }
+  }
+}
