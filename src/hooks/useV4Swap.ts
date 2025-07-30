@@ -289,7 +289,7 @@ export function useV4Swap() {
   }, []);
 
   // ✅ FIXED: Use publicClient for reading contracts
-  const fetchQuote = useCallback(async ({
+const fetchQuote = useCallback(async ({
     tokenIn,
     tokenOut,
     amountIn,
@@ -310,19 +310,61 @@ export function useV4Swap() {
       const { getPoolInfo, generatePoolId } = await import('../utils/stateViewUtils');
       const poolId = generatePoolId(normalizedPoolKey);
       
-      // ✅ Use publicClient for reading
       const poolInfo = await getPoolInfo(chainId, publicClient, poolId);
 
-      if (!poolInfo || !poolInfo.sqrtPriceX96 || poolInfo.tick === undefined) return null;
-      if (typeof tokenIn.decimals !== 'number' || typeof tokenOut.decimals !== 'number') return null;
+      if (!poolInfo || !poolInfo.sqrtPriceX96 || poolInfo.tick === undefined)
+        return null;
+      if (
+        typeof tokenIn.decimals !== "number" ||
+        typeof tokenOut.decimals !== "number"
+      )
+        return null;
 
-      const normalizedTokenInAddr = normalizeTokenAddress(tokenIn.address);
-      const normalizedTokenOutAddr = normalizeTokenAddress(tokenOut.address);
+      // 🔥 FIX: Helper function to check if token matches pool currency
+      const isTokenMatchingPoolCurrency = (tokenAddress: string, poolCurrency: string): boolean => {
+        const normalizedToken = normalizeTokenAddress(tokenAddress);
+        const normalizedPool = poolCurrency.toLowerCase();
+        
+        // Direct match
+        if (normalizedToken === normalizedPool) return true;
+        
+        // Check if token is native (0x000) and pool currency is wrapped token
+        if (isNativeToken(normalizedToken)) {
+          const wrappedAddress = getWrappedTokenAddress(chainId);
+          return normalizedPool === wrappedAddress.toLowerCase();
+        }
+        
+        return false;
+      };
+
+      // Use the helper function for comparisons
+      const isTokenInCurrency0 = isTokenMatchingPoolCurrency(tokenIn.address, normalizedPoolKey.currency0);
+      const isTokenOutCurrency0 = isTokenMatchingPoolCurrency(tokenOut.address, normalizedPoolKey.currency0);
+      const isTokenInCurrency1 = isTokenMatchingPoolCurrency(tokenIn.address, normalizedPoolKey.currency1);
+      const isTokenOutCurrency1 = isTokenMatchingPoolCurrency(tokenOut.address, normalizedPoolKey.currency1);
+
+      // Determine decimals and symbols for pool currencies
+      const currency0DecimalsFinal = isTokenInCurrency0 ? tokenIn.decimals : tokenOut.decimals;
+      const currency1DecimalsFinal = isTokenInCurrency1 ? tokenIn.decimals : tokenOut.decimals;
       
-      const currency0 = new SDKToken(chainId, normalizedPoolKey.currency0, tokenIn.decimals, tokenIn.symbol);
-      const currency1 = new SDKToken(chainId, normalizedPoolKey.currency1, tokenOut.decimals, tokenOut.symbol);
+      const currency0Symbol = isTokenInCurrency0 ? tokenIn.symbol : tokenOut.symbol;
+      const currency1Symbol = isTokenInCurrency1 ? tokenIn.symbol : tokenOut.symbol;
 
-      const zeroForOne = normalizedPoolKey.currency0.toLowerCase() === normalizedTokenInAddr.toLowerCase();
+      const currency0 = new SDKToken(
+        chainId,
+        normalizedPoolKey.currency0,
+        currency0DecimalsFinal,
+        currency0Symbol
+      );
+      const currency1 = new SDKToken(
+        chainId,
+        normalizedPoolKey.currency1,
+        currency1DecimalsFinal,
+        currency1Symbol
+      );
+
+      // Determine trade direction
+      const zeroForOne = isTokenInCurrency0;
 
       try {
         const pool = new Pool(
@@ -348,14 +390,21 @@ export function useV4Swap() {
           return amountOut.toSignificant(6);
         }
       } catch (sdkError) {
-        console.warn('[fetchQuote] SDK pool failed — trying fallback', sdkError);
+        console.warn(
+          "[fetchQuote] SDK pool failed — trying fallback",
+          sdkError
+        );
       }
+
+      const [decimalsIn, decimalsOut] = zeroForOne
+        ? [currency0DecimalsFinal, currency1DecimalsFinal]
+        : [currency1DecimalsFinal, currency0DecimalsFinal];
 
       const fallbackAmountOut = getQuoteFromSqrtPriceX96(
         amountIn,
         BigInt(poolInfo.sqrtPriceX96),
-        tokenIn.decimals,
-        tokenOut.decimals,
+        decimalsIn,
+        decimalsOut,
         zeroForOne
       );
 
@@ -366,7 +415,6 @@ export function useV4Swap() {
       return null;
     }
   }, [chainId, publicClient]);
-
   // ✅ FIXED: Use publicClient for reading, walletClient for writing
   const approveTokenToPermit2 = useCallback(async (tokenAddress: string, amount: bigint): Promise<{ success: boolean; error?: string }> => {
     const normalizedAddress = normalizeTokenAddress(tokenAddress);
