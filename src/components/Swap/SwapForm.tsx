@@ -269,13 +269,11 @@ const LoadingText = styled.div`
   font-weight: 500;
   text-align: center;
 `
-
 const LoadingSubtext = styled.div`
   color: ${({ theme }) => theme.colors.neutral2};
   font-size: 14px;
   text-align: center;
 `
-
 interface PoolKey {
   currency0: string;
   currency1: string;
@@ -283,7 +281,6 @@ interface PoolKey {
   tickSpacing: number;
   hooks: string;
 }
-
 export function SwapForm() {
   // Basic UI state
   const [error, setError] = useState<string | null>(null);
@@ -291,18 +288,15 @@ export function SwapForm() {
   const [sellMode, setSellMode] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'swap' | 'limit' | 'buy' | 'sell'>('swap');
   const [inputHover, setInputHover] = useState(false);
-
   // Auto-selection tracking
   const [autoSelectedPool, setAutoSelectedPool] = useState<any>(null);
   const [quote, setQuote] = useState<string | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [ticks, setTicks] = useState<any[]>([]);
-
   // ✅ FIXED: Use refs to prevent infinite loops
   const autoSelectionInProgressRef = useRef(false);
   const lastAutoSelectionKeyRef = useRef<string>('');
-
   const { isConnected, address } = useAccount();
   const { openConnectModal } = useConnectModal()
   const { data: walletClient } = useWalletClient();
@@ -357,42 +351,42 @@ export function SwapForm() {
       body: JSON.stringify({
         query:`  
         query Pool {
-    Pool {
-      id
-      chainId
-      name
-      createdAtTimestamp
-      createdAtBlockNumber
-      token0
-      token1
-      feeTier
-      liquidity
-      sqrtPrice
-      token0Price
-      token1Price
-      tick
-      tickSpacing
-      observationIndex
-      volumeToken0
-      volumeToken1
-      volumeUSD
-      untrackedVolumeUSD
-      feesUSD
-      feesUSDUntracked
-      txCount
-      collectedFeesToken0
-      collectedFeesToken1
-      collectedFeesUSD
-      totalValueLockedToken0
-      totalValueLockedToken1
-      totalValueLockedETH
-      totalValueLockedUSD
-      totalValueLockedUSDUntracked
-      liquidityProviderCount
-      hooks
-      db_write_timestamp
-    }
+    Pool(where: { liquidity: { _neq: "0" } }) {
+    id
+    chainId
+    name
+    createdAtTimestamp
+    createdAtBlockNumber
+    token0
+    token1
+    feeTier
+    liquidity
+    sqrtPrice
+    token0Price
+    token1Price
+    tick
+    tickSpacing
+    observationIndex
+    volumeToken0
+    volumeToken1
+    volumeUSD
+    untrackedVolumeUSD
+    feesUSD
+    feesUSDUntracked
+    txCount
+    collectedFeesToken0
+    collectedFeesToken1
+    collectedFeesUSD
+    totalValueLockedToken0
+    totalValueLockedToken1
+    totalValueLockedETH
+    totalValueLockedUSD
+    totalValueLockedUSDUntracked
+    liquidityProviderCount
+    hooks
+    db_write_timestamp
   }
+}
     `
       })
     })
