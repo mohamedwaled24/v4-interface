@@ -341,6 +341,7 @@ export function SwapForm() {
   const [allPools, setAllPools] = useState<any[]>([]);
   const [poolsLoading, setPoolsLoading] = useState(true);
   const [poolLiquidity , setPoolLiquidity] = useState<any>(null);
+  const [matchingPoolss, setMatchingPoolss] = useState<boolean>(false);
 
   // Fetch pools on mount
   useEffect(() => {
@@ -387,7 +388,7 @@ export function SwapForm() {
     db_write_timestamp
   }
 }
-    `
+`
       })
     })
       .then(res => res.json())
@@ -759,6 +760,7 @@ const autoSelectPool = useCallback(async () => {
   
 const getButtonText = () => {
   if (!swapState.poolKey) return 'Select tokens';
+  if(swapState.poolKey && !matchingPoolss) return 'No pools found';
   if (isValidatingPool) return 'Validating Pool...';
   if (!swapState.tokenIn) return 'Select input token';
   if (!swapState.tokenOut) return 'Select output token';
