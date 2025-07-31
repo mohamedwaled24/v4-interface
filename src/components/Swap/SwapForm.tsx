@@ -464,6 +464,7 @@ const autoSelectPool = useCallback(async () => {
           liquidity: pool.totalValueLockedToken0,
           pool
         });
+        setMatchingPoolss(true);
       }
 
       return matches;
@@ -472,6 +473,7 @@ const autoSelectPool = useCallback(async () => {
     console.log(`📊 Found ${matchingPools.length} matching pools`);
 
     if (matchingPools.length === 0) {
+      setMatchingPoolss(false);
       console.log('❌ No matching pools found');
       setAutoSelectedPool(null);
       updatePoolId('');
@@ -759,7 +761,7 @@ const autoSelectPool = useCallback(async () => {
 };
   
 const getButtonText = () => {
-  if (!swapState.poolKey) return 'Select tokens';
+  if (!swapState.poolKey) return 'Not Availble';
   if(swapState.poolKey && !matchingPoolss) return 'No pools found';
   if (isValidatingPool) return 'Validating Pool...';
   if (!swapState.tokenIn) return 'Select input token';
