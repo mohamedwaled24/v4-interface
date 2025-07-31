@@ -351,11 +351,55 @@ export function SwapForm() {
   // Fetch pools on mount
   useEffect(() => {
     setPoolsLoading(true);
-    fetch(GRAPHQL_ENDPOINTS.allPools)
+    fetch(GRAPHQL_ENDPOINTS.allPools,{
+      method:'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query:`  
+        query Pool {
+    Pool {
+      id
+      chainId
+      name
+      createdAtTimestamp
+      createdAtBlockNumber
+      token0
+      token1
+      feeTier
+      liquidity
+      sqrtPrice
+      token0Price
+      token1Price
+      tick
+      tickSpacing
+      observationIndex
+      volumeToken0
+      volumeToken1
+      volumeUSD
+      untrackedVolumeUSD
+      feesUSD
+      feesUSDUntracked
+      txCount
+      collectedFeesToken0
+      collectedFeesToken1
+      collectedFeesUSD
+      totalValueLockedToken0
+      totalValueLockedToken1
+      totalValueLockedETH
+      totalValueLockedUSD
+      totalValueLockedUSDUntracked
+      liquidityProviderCount
+      hooks
+      db_write_timestamp
+    }
+  }
+    `
+      })
+    })
       .then(res => res.json())
       .then(data => {
         console.log('Fetched pools:', data)
-        setAllPools(data.Pool || []);
+        setAllPools(data.data?.Pool || []);
         setPoolsLoading(false);
       })
       .catch(() => setPoolsLoading(false));
