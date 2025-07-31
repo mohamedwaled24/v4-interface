@@ -351,7 +351,7 @@ export function SwapForm() {
   // Fetch pools on mount
   useEffect(() => {
     setPoolsLoading(true);
-    fetch(GRAPHQL_ENDPOINTS.all)
+    fetch(GRAPHQL_ENDPOINTS.allPools)
       .then(res => res.json())
       .then(data => {
         console.log('Fetched pools:', data)
