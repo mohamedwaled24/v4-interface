@@ -342,6 +342,7 @@ export function SwapForm() {
   const [poolsLoading, setPoolsLoading] = useState(true);
   const [poolLiquidity , setPoolLiquidity] = useState<any>(null);
   const [matchingPoolss, setMatchingPoolss] = useState<boolean>(false);
+const chainId = walletClient?.chain?.id || publicClient?.chain?.id; // fallback to 56 if not connected
 
   // Fetch pools on mount
   useEffect(() => {
@@ -352,7 +353,7 @@ export function SwapForm() {
       body: JSON.stringify({
         query:`  
         query Pool {
-    Pool(where: { liquidity: { _neq: "0" } }) {
+    Pool(where: { chainId: {_eq: "${chainId}"} , liquidity: { _neq: "0" } }) {
     id
     chainId
     name
