@@ -5,7 +5,7 @@ export const GRAPHQL_ENDPOINTS = {
   1301: 'https://indexer.dev.hyperindex.xyz/771be56/v1/graphql', // Unichain Sepolia
   56: 'http://localhost:8080/api/rest/PoolManager_Initialize', // BNB Smart Chain
   all: 'http://localhost:8080/api/rest/Pool', // All pools, all networks
-  allPools:'https://indexer.dev.hyperindex.xyz/7c4efed/v1/graphql'
+  allPools:'https://indexer.dev.hyperindex.xyz/02a5e20/v1/graphql'
 } as const;
 
 // Network names for display
