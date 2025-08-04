@@ -50,19 +50,17 @@ const InputContainer = styled.div<{ $error?: boolean }>`
   width: fit-content;
   max-width: 140px;
   transition: all 0.2s cubic-bezier(0.77, 0, 0.175, 1);
-
   &:hover {
     transform: scale(1.04);
   }
 `
-
 const TokenPlaceholder = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   color: white;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: bold;
   white-space: nowrap;
   padding: 0px 12px;

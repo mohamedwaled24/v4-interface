@@ -16,6 +16,7 @@ import '@rainbow-me/rainbowkit/styles.css';
 import {
   getDefaultConfig,
   RainbowKitProvider,
+  connectorsForWallets 
 } from '@rainbow-me/rainbowkit';
 import { WagmiProvider } from 'wagmi';
 import {
@@ -30,11 +31,41 @@ import {
   QueryClientProvider,
   QueryClient,
 } from "@tanstack/react-query";
+import {
+  rainbowWallet,
+  walletConnectWallet,
+  injectedWallet ,
+  oneInchWallet ,
+  binanceWallet ,
+  bitgetWallet ,
+  coinbaseWallet ,
+  trustWallet ,
+  metaMaskWallet
+} from '@rainbow-me/rainbowkit/wallets';
+
+
+const connectors = connectorsForWallets(
+  [
+    {
+      groupName: 'Recommended',
+      wallets: [metaMaskWallet,trustWallet ,rainbowWallet, walletConnectWallet ],
+    },
+        {
+      groupName: 'Others',
+      wallets: [bitgetWallet ,coinbaseWallet ,oneInchWallet ,injectedWallet ,binanceWallet ],
+    },
+  ],
+  {
+    appName: 'Pantherai',
+    projectId: '587f4e8f50993af606ccef3ab747280f',
+  }
+);
 
 const config = getDefaultConfig({
-  appName: 'My RainbowKit App',
+  connectors,
+  appName: 'Pantherai',
   projectId: '587f4e8f50993af606ccef3ab747280f',
-  chains: [mainnet, polygon, optimism, arbitrum, base , bsc],
+  chains: [ bsc , mainnet, polygon, optimism, arbitrum, base ],
   ssr: false, // If your dApp uses server side rendering (SSR)
 });
 
