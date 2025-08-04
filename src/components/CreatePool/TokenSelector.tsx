@@ -38,12 +38,12 @@ const InputContainer = styled.div<{ $error?: boolean }>`
   cursor: pointer;
   outline-color: rgba(0, 0, 0, 0);
   background-image: linear-gradient(25deg, #741ff5, #e348ff);
-  border-radius: 999999px;
+  border-radius: 30px;
   border-color: rgb(242, 242, 242);
   border-width: 1px;
   border-style: solid;
   box-shadow: rgba(34, 34, 34, 0.04) 0px 0px 10px;
-  transform: scale(1);
+  transform: scale(0.6);
   opacity: 1;
   padding: 3px 8px;
   gap: 4px;
