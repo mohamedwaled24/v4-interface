@@ -96,6 +96,12 @@ export const normalizeTokenAddress = (tokenAddress: string, preserveNative = fal
     return tokenAddress;
   }
 };
+const getWrappedTokenAddress = (chainId: number): string => {
+  if (chainId === 56) return "0x0000000000000000000000000000000000000000"; // WBNB
+  if (chainId === 1) return "0x0000000000000000000000000000000000000000"; // WETH
+  // Add more chains as needed
+  return "";
+};
 
 // ✅ FIXED: Memoized normalization to prevent unnecessary object creation
 export const normalizePoolKey = (poolKey: PoolKey): PoolKey => {
