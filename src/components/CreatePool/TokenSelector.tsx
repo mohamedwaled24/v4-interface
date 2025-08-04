@@ -43,7 +43,7 @@ const InputContainer = styled.div<{ $error?: boolean }>`
   border-width: 1px;
   border-style: solid;
   box-shadow: rgba(34, 34, 34, 0.04) 0px 0px 10px;
-  transform: scale(0.6);
+  transform: scale(0.9);
   opacity: 1;
   padding: 3px 8px;
   gap: 4px;
