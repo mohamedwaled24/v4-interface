@@ -1,10 +1,11 @@
 import { useState, useCallback, useRef } from 'react'
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
+import {formatUnits } from 'viem'
 import { parseUnits, keccak256, encodePacked, encodeAbiParameters, maxUint256, encodeFunctionData, getAddress } from 'viem'
 import { SUPPORTED_NETWORKS } from '../constants/networks'
 import { CONTRACTS } from '../constants/contracts'
-import { V4Planner, Actions, Pool, TickListDataProvider } from '@uniswap/v4-sdk'
-import { Token as SDKToken, Currency, TradeType, Percent, CurrencyAmount } from '@uniswap/sdk-core'
+import { V4Planner, Actions, Pool} from '@uniswap/v4-sdk'
+import { Token as SDKToken, CurrencyAmount } from '@uniswap/sdk-core'
 import universalRouterAbi from '../../contracts/universalRouter.json'
 import permit2Abi from '../../contracts/permit2.json'
 import { ERC20_ABI } from '../../contracts/ERC20_ABI'
@@ -294,6 +295,94 @@ export function useV4Swap() {
     lastPoolKeyRef.current = null;
   }, []);
 
+  // Debug version to identify the exact issue
+const debugQuoteCalculation = (
+  tokenIn,
+  tokenOut,
+  amountIn,
+  poolInfo,
+  normalizedPoolKey,
+  zeroForOne
+) => {
+  console.log('🔍 DEBUG QUOTE CALCULATION:');
+  console.log('Input params:', {
+    tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
+    tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
+    amountIn,
+    zeroForOne,
+    poolSqrtPriceX96: poolInfo.sqrtPriceX96.toString(),
+    poolTick: poolInfo.tick
+  });
+
+  // Debug the decimal assignment that goes to fallback
+  const decimalsIn = tokenIn.decimals;
+  const decimalsOut = tokenOut.decimals;
+  
+  console.log('Decimals being passed to fallback:', {
+    decimalsIn,
+    decimalsOut,
+    tokenInSymbol: tokenIn.symbol,
+    tokenOutSymbol: tokenOut.symbol
+  });
+
+  // Let's manually check what the fallback calculation does
+  const amountInParsed = parseUnits(amountIn, decimalsIn);
+  console.log('Parsed amount in:', {
+    original: amountIn,
+    parsed: amountInParsed.toString(),
+    decimalsUsed: decimalsIn
+  });
+
+  // Debug the price calculation
+  const Q96 = BigInt(2) ** BigInt(96);
+  const sqrtPriceX96 = BigInt(poolInfo.sqrtPriceX96);
+  const priceX96 = (sqrtPriceX96 ** BigInt(2)) / Q96;
+  
+  console.log('Price calculation:', {
+    sqrtPriceX96: sqrtPriceX96.toString(),
+    priceX96: priceX96.toString(),
+    Q96: Q96.toString()
+  });
+
+  // Calculate based on direction
+  let amountOut;
+  if (zeroForOne) {
+    // token0 → token1: use direct price
+    amountOut = (amountInParsed * Q96) / priceX96;
+    console.log('ZeroForOne = true (token0 → token1):', {
+      calculation: `(${amountInParsed.toString()} * ${Q96.toString()}) / ${priceX96.toString()}`,
+      result: amountOut.toString()
+    });
+  } else {
+    // token1 → token0: use inverse price  
+    amountOut = (amountInParsed * priceX96) / Q96;
+    console.log('ZeroForOne = false (token1 → token0):', {
+      calculation: `(${amountInParsed.toString()} * ${priceX96.toString()}) / ${Q96.toString()}`,
+      result: amountOut.toString()
+    });
+  }
+
+  const finalResult = formatUnits(amountOut, decimalsOut);
+  console.log('Final result:', {
+    amountOutRaw: amountOut.toString(),
+    decimalsOutUsed: decimalsOut,
+    finalFormatted: finalResult
+  });
+
+  // Let's also check what the "correct" calculation should be
+  // For debugging: assume 1 USDT = 1 USD, 1 BNB = 760 USD
+  const expectedRatio = 1 / 760; // USDT/BNB ratio
+  const expectedOutput = parseFloat(amountIn) * expectedRatio;
+  console.log('Expected output (for sanity check):', {
+    expectedRatio,
+    expectedOutput: expectedOutput.toString(),
+    actualOutput: finalResult,
+    difference: `${parseFloat(finalResult) / expectedOutput}x off`
+  });
+
+  return finalResult;
+};
+
   // ✅ FIXED: Use publicClient for reading contracts
 const fetchQuote = useCallback(async ({
     tokenIn,
@@ -313,6 +402,18 @@ const fetchQuote = useCallback(async ({
 
       const normalizedPoolKey = normalizePoolKey(poolKey);
       
+      // Debug logging for pool and token information
+      console.log('[fetchQuote Debug]', {
+        tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
+        tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
+        poolKey: {
+          currency0: normalizedPoolKey.currency0,
+          currency1: normalizedPoolKey.currency1,
+          fee: normalizedPoolKey.fee
+        },
+        chainId
+      });
+      
       const { getPoolInfo, generatePoolId } = await import('../utils/stateViewUtils');
       const poolId = generatePoolId(normalizedPoolKey);
       
@@ -326,18 +427,54 @@ const fetchQuote = useCallback(async ({
       )
         return null;
 
-      // 🔥 FIX: Helper function to check if token matches pool currency
+      // 🔥 FIX: Enhanced helper function to check if token matches pool currency
       const isTokenMatchingPoolCurrency = (tokenAddress: string, poolCurrency: string): boolean => {
-        const normalizedToken = normalizeTokenAddress(tokenAddress);
+        const normalizedToken = tokenAddress.toLowerCase();
         const normalizedPool = poolCurrency.toLowerCase();
         
-        // Direct match
-        if (normalizedToken === normalizedPool) return true;
+        // Debug logging
+        console.log('[Token Matching]', {
+          originalToken: tokenAddress,
+          normalizedToken,
+          poolCurrency,
+          normalizedPool
+        });
         
-        // Check if token is native (0x000) and pool currency is wrapped token
-        if (isNativeToken(normalizedToken)) {
+        // Direct match (case insensitive)
+        if (normalizedToken === normalizedPool) {
+          console.log('[Token Matching] Direct match found');
+          return true;
+        }
+        
+        // Check if token is native and pool currency is wrapped token
+        const isTokenNative = isNativeToken(tokenAddress) || 
+                             tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        
+        if (isTokenNative) {
           const wrappedAddress = getWrappedTokenAddress(chainId);
-          return normalizedPool === wrappedAddress.toLowerCase();
+          const normalizedWrapped = wrappedAddress.toLowerCase();
+          console.log('[Token Matching] Native token check:', {
+            wrappedAddress,
+            normalizedWrapped,
+            matches: normalizedPool === normalizedWrapped
+          });
+          return normalizedPool === normalizedWrapped;
+        }
+        
+        // Check if pool currency is native representation and token is wrapped
+        const isPoolNative = poolCurrency === '0x0000000000000000000000000000000000000000' || 
+                            poolCurrency.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+                            poolCurrency.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+                            
+        if (isPoolNative) {
+          const wrappedAddress = getWrappedTokenAddress(chainId);
+          const normalizedWrapped = wrappedAddress.toLowerCase();
+          console.log('[Token Matching] Pool native check:', {
+            normalizedToken,
+            normalizedWrapped,
+            matches: normalizedToken === normalizedWrapped
+          });
+          return normalizedToken === normalizedWrapped;
         }
         
         return false;
@@ -349,12 +486,160 @@ const fetchQuote = useCallback(async ({
       const isTokenInCurrency1 = isTokenMatchingPoolCurrency(tokenIn.address, normalizedPoolKey.currency1);
       const isTokenOutCurrency1 = isTokenMatchingPoolCurrency(tokenOut.address, normalizedPoolKey.currency1);
 
-      // Determine decimals and symbols for pool currencies
-      const currency0DecimalsFinal = isTokenInCurrency0 ? tokenIn.decimals : tokenOut.decimals;
-      const currency1DecimalsFinal = isTokenInCurrency1 ? tokenIn.decimals : tokenOut.decimals;
-      
-      const currency0Symbol = isTokenInCurrency0 ? tokenIn.symbol : tokenOut.symbol;
-      const currency1Symbol = isTokenInCurrency1 ? tokenIn.symbol : tokenOut.symbol;
+      // Debug logging for token matching results
+      console.log('[Token Matching Results]', {
+        tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol },
+        tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol },
+        poolCurrency0: normalizedPoolKey.currency0,
+        poolCurrency1: normalizedPoolKey.currency1,
+        isTokenInCurrency0,
+        isTokenOutCurrency0,
+        isTokenInCurrency1,
+        isTokenOutCurrency1
+      });
+
+      // 🔥 FIXED: More robust decimal and symbol assignment with fallback
+      let currency0DecimalsFinal: number;
+      let currency1DecimalsFinal: number;
+      let currency0Symbol: string;
+      let currency1Symbol: string;
+
+      // First, try to determine currency0 properties
+      if (isTokenInCurrency0) {
+        currency0DecimalsFinal = tokenIn.decimals;
+        currency0Symbol = tokenIn.symbol;
+      } else if (isTokenOutCurrency0) {
+        currency0DecimalsFinal = tokenOut.decimals;
+        currency0Symbol = tokenOut.symbol;
+      } else {
+        // Fallback: If we can't match either token to currency0, try to infer from addresses
+        console.warn('[fetchQuote] Using fallback for currency0 properties');
+        
+        // Check if currency0 looks like a native token address
+        const currency0IsNative = normalizedPoolKey.currency0 === '0x0000000000000000000000000000000000000000' ||
+                                  normalizedPoolKey.currency0.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+                                  normalizedPoolKey.currency0.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        
+        if (currency0IsNative) {
+          // If currency0 is native, check which of our tokens is native or wrapped
+          const tokenInIsNative = isNativeToken(tokenIn.address) || 
+                                 tokenIn.address.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+          const tokenOutIsNative = isNativeToken(tokenOut.address) || 
+                                  tokenOut.address.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+          const wrappedAddress = getWrappedTokenAddress(chainId).toLowerCase();
+          const tokenInIsWrapped = tokenIn.address.toLowerCase() === wrappedAddress;
+          const tokenOutIsWrapped = tokenOut.address.toLowerCase() === wrappedAddress;
+          
+          if (tokenInIsNative || tokenInIsWrapped) {
+            currency0DecimalsFinal = tokenIn.decimals;
+            currency0Symbol = tokenIn.symbol;
+          } else if (tokenOutIsNative || tokenOutIsWrapped) {
+            currency0DecimalsFinal = tokenOut.decimals;
+            currency0Symbol = tokenOut.symbol;
+          } else {
+            console.error('[fetchQuote] Cannot determine currency0 properties - no native/wrapped match');
+            return null;
+          }
+        } else {
+          // If currency0 is not native, try direct address comparison (case insensitive)
+          const currency0Lower = normalizedPoolKey.currency0.toLowerCase();
+          const tokenInLower = tokenIn.address.toLowerCase();
+          const tokenOutLower = tokenOut.address.toLowerCase();
+          
+          console.log('[Currency0 Address Comparison]', {
+            currency0Lower,
+            tokenInLower,
+            tokenOutLower,
+            tokenInMatches: tokenInLower === currency0Lower,
+            tokenOutMatches: tokenOutLower === currency0Lower
+          });
+          
+          if (tokenInLower === currency0Lower) {
+            currency0DecimalsFinal = tokenIn.decimals;
+            currency0Symbol = tokenIn.symbol;
+          } else if (tokenOutLower === currency0Lower) {
+            currency0DecimalsFinal = tokenOut.decimals;
+            currency0Symbol = tokenOut.symbol;
+          } else {
+            console.error('[fetchQuote] Cannot determine currency0 properties - no address match', {
+              currency0: normalizedPoolKey.currency0,
+              currency0Lower,
+              tokenIn: tokenIn.address,
+              tokenInLower,
+              tokenOut: tokenOut.address,
+              tokenOutLower
+            });
+            return null;
+          }
+        }
+      }
+
+      // Then, determine currency1 properties
+      if (isTokenInCurrency1) {
+        currency1DecimalsFinal = tokenIn.decimals;
+        currency1Symbol = tokenIn.symbol;
+      } else if (isTokenOutCurrency1) {
+        currency1DecimalsFinal = tokenOut.decimals;
+        currency1Symbol = tokenOut.symbol;
+      } else {
+        // Fallback: Similar logic for currency1
+        console.warn('[fetchQuote] Using fallback for currency1 properties');
+        
+        const currency1IsNative = normalizedPoolKey.currency1 === '0x0000000000000000000000000000000000000000' ||
+                                  normalizedPoolKey.currency1.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+                                  normalizedPoolKey.currency1.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        
+        if (currency1IsNative) {
+          const tokenInIsNative = isNativeToken(tokenIn.address) || 
+                                 tokenIn.address.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+          const tokenOutIsNative = isNativeToken(tokenOut.address) || 
+                                  tokenOut.address.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+          const wrappedAddress = getWrappedTokenAddress(chainId).toLowerCase();
+          const tokenInIsWrapped = tokenIn.address.toLowerCase() === wrappedAddress;
+          const tokenOutIsWrapped = tokenOut.address.toLowerCase() === wrappedAddress;
+          
+          if (tokenInIsNative || tokenInIsWrapped) {
+            currency1DecimalsFinal = tokenIn.decimals;
+            currency1Symbol = tokenIn.symbol;
+          } else if (tokenOutIsNative || tokenOutIsWrapped) {
+            currency1DecimalsFinal = tokenOut.decimals;
+            currency1Symbol = tokenOut.symbol;
+          } else {
+            console.error('[fetchQuote] Cannot determine currency1 properties - no native/wrapped match');
+            return null;
+          }
+        } else {
+          const currency1Lower = normalizedPoolKey.currency1.toLowerCase();
+          const tokenInLower = tokenIn.address.toLowerCase();
+          const tokenOutLower = tokenOut.address.toLowerCase();
+          
+          console.log('[Currency1 Address Comparison]', {
+            currency1Lower,
+            tokenInLower,
+            tokenOutLower,
+            tokenInMatches: tokenInLower === currency1Lower,
+            tokenOutMatches: tokenOutLower === currency1Lower
+          });
+          
+          if (tokenInLower === currency1Lower) {
+            currency1DecimalsFinal = tokenIn.decimals;
+            currency1Symbol = tokenIn.symbol;
+          } else if (tokenOutLower === currency1Lower) {
+            currency1DecimalsFinal = tokenOut.decimals;
+            currency1Symbol = tokenOut.symbol;
+          } else {
+            console.error('[fetchQuote] Cannot determine currency1 properties - no address match', {
+              currency1: normalizedPoolKey.currency1,
+              currency1Lower,
+              tokenIn: tokenIn.address,
+              tokenInLower,
+              tokenOut: tokenOut.address,
+              tokenOutLower
+            });
+            return null;
+          }
+        }
+      }
 
       const currency0 = new SDKToken(
         chainId,
@@ -369,8 +654,58 @@ const fetchQuote = useCallback(async ({
         currency1Symbol
       );
 
-      // Determine trade direction
-      const zeroForOne = isTokenInCurrency0;
+      // Determine trade direction - more robust approach
+      let zeroForOne: boolean;
+      
+      // First try using the original matching results
+      if (isTokenInCurrency0 && (isTokenOutCurrency1 || !isTokenOutCurrency0)) {
+        zeroForOne = true;
+      } else if (isTokenInCurrency1 && (isTokenOutCurrency0 || !isTokenOutCurrency1)) {
+        zeroForOne = false;
+      } else {
+        // Fallback: determine based on which token matches which currency
+        const tokenInLower = tokenIn.address.toLowerCase();
+        const currency0Lower = normalizedPoolKey.currency0.toLowerCase();
+        const currency1Lower = normalizedPoolKey.currency1.toLowerCase();
+        
+        // Check for direct address match
+        const tokenInMatchesCurrency0Direct = tokenInLower === currency0Lower;
+        
+        // Check for native/wrapped token match with currency0
+        const tokenInIsNative = isNativeToken(tokenIn.address) || 
+                               tokenInLower === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        const currency0IsNative = currency0Lower === '0x0000000000000000000000000000000000000000' ||
+                                 currency0Lower === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        const wrappedAddressLower = getWrappedTokenAddress(chainId).toLowerCase();
+        const tokenInMatchesCurrency0Native = 
+          (tokenInIsNative && currency0Lower === wrappedAddressLower) ||
+          (currency0IsNative && tokenInLower === wrappedAddressLower);
+        
+        const tokenInMatchesCurrency0 = tokenInMatchesCurrency0Direct || tokenInMatchesCurrency0Native;
+        
+        zeroForOne = tokenInMatchesCurrency0;
+        
+        console.log('[Trade Direction Fallback]', {
+          tokenInLower,
+          currency0Lower,
+          currency1Lower,
+          tokenInIsNative,
+          currency0IsNative,
+          wrappedAddressLower,
+          tokenInMatchesCurrency0Direct,
+          tokenInMatchesCurrency0Native,
+          tokenInMatchesCurrency0,
+          zeroForOne
+        });
+      }
+
+      console.log('[Trade Direction]', {
+        zeroForOne,
+        tokenInSymbol: tokenIn.symbol,
+        tokenOutSymbol: tokenOut.symbol,
+        currency0Symbol,
+        currency1Symbol
+      });
 
       try {
         const pool = new Pool(
@@ -402,9 +737,11 @@ const fetchQuote = useCallback(async ({
         );
       }
 
-      const [decimalsIn, decimalsOut] = zeroForOne
-        ? [currency0DecimalsFinal, currency1DecimalsFinal]
-        : [currency1DecimalsFinal, currency0DecimalsFinal];
+      // 🔥 FIXED: Correct decimal mapping for fallback
+      const decimalsIn = tokenIn.decimals;
+      const decimalsOut = tokenOut.decimals;
+      const debugResult = debugQuoteCalculation(tokenIn, tokenOut, amountIn, poolInfo, normalizedPoolKey, zeroForOne);
+      console.log('Debug result:', debugResult);
 
       const fallbackAmountOut = getQuoteFromSqrtPriceX96(
         amountIn,
