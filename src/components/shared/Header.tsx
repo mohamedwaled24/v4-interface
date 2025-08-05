@@ -68,18 +68,80 @@ const MobileSearchButton = styled.button`
 const LogoContainer = styled.div`
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 40px;
+  gap: 4px;
+  height: auto;
   line-height: 1;
+  
+  /* Mobile first approach */
+  @media (max-width: 480px) {
+    gap: 3px;
+  }
+  
+  @media (min-width: 768px) {
+    gap: 5px;
+  }
+  
+  @media (min-width: 1024px) {
+    gap: 6px;
+  }
 `;
 
 const LogoIcon = styled.div`
   display: flex;
   align-items: center;
-  width: 180px;
+  width: clamp(10px, 12vw, 120px); /* Responsive width with min/max bounds */
+  height: auto;
+  
   img {
     width: 100%;
+    height: auto;
     object-fit: contain;
+    display: block;
+    max-height: 30px; /* Prevent logo from getting too tall */
+  }
+  
+  /* Specific breakpoints for fine-tuning */
+  @media (max-width: 320px) {
+    width: 150px;
+    img {
+      max-height: 24px;
+    }
+  }
+  
+  @media (min-width: 321px) and (max-width: 480px) {
+    width: 150px;
+    img {
+      max-height: 24px;
+    }
+  }
+  
+  @media (min-width: 481px) and (max-width: 768px) {
+    width: 150px;
+    img {
+      max-height: 26px;
+    }
+  }
+  
+  @media (min-width: 769px) and (max-width: 1024px) {
+    width: 160px;
+    img {
+      max-height: 28px;
+    }
+  }
+  
+  @media (min-width: 1025px) {
+    width: 180px;
+    img {
+      max-height: 30px;
+    }
+  }
+  
+  /* For very large screens */
+  @media (min-width: 1440px) {
+    width: 190px;
+    img {
+      max-height: 32px;
+    }
   }
 `;
 
