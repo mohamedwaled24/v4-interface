@@ -10,12 +10,14 @@ import { DeployedPoolsList, addDeployedPool } from './DeployedPoolsList'
 import { GRAPHQL_ENDPOINTS } from '../../config/graphql';
 import { SUPPORTED_NETWORKS } from '../../constants/networks';
 import { useBalance } from '../../hooks/useBalance'
+import CoinsSection from '../coinsSection/CoinsSection'
 
 const Container = styled.div`
   display: flex;
   justify-content: center;
   align-items: flex-start;
   width: 100%;
+  gap: 24px;
   padding:20px;
   box-sizing: border-box;
   flex-direction: column;
@@ -973,6 +975,7 @@ const isButtonDisabled = () => {
           {successMessage && <SuccessMessage>{successMessage}</SuccessMessage>}
         </SwapContainer>
       </MainContent>
+      <CoinsSection />
       
       {/* Loading Overlay */}
       {isSwapping && (
