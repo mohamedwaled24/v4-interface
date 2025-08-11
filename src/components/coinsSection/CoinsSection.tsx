@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import styled from "styled-components";
 import CustomPaginationActionsTable from './CoinsTable';
+import CardsWidget from './CardsWidget';
 
 const Container = styled.section`
   width: 100%;
@@ -12,10 +13,12 @@ const Container = styled.section`
 const ContainerStruct = styled.div`
   display: flex;
   flex-direction: column;
+  align-items:center;
+  justify-content:center;
   gap: 8px;
   max-width: 1200px;
+  padding:0;
   margin: 0 auto;
-  padding: 0 16px;
 `;
 
 const ContainerHeader = styled.div`
@@ -58,7 +61,6 @@ const CoinsSection = () => {
       setLoadingTokens(true);
       try {
         const response = await fetch(`https://rest.coincap.io/v3/assets?apiKey=${apiKey}`);
-        
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -84,6 +86,7 @@ const CoinsSection = () => {
   return (
     <Container>
       <ContainerStruct>
+       <CardsWidget />
         <ContainerHeader>
           <ContainerTitle>Cryptocurrency Market</ContainerTitle>
         </ContainerHeader>
