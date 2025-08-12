@@ -11,6 +11,7 @@ import { client } from './apollo/client'
 import { WalletProvider } from './contexts/WalletContext'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
+import Footer from './components/shared/Footer'
 
 import '@rainbow-me/rainbowkit/styles.css';
 import {
@@ -42,6 +43,8 @@ import {
   trustWallet ,
   metaMaskWallet
 } from '@rainbow-me/rainbowkit/wallets';
+import SwapSection from './sections/SwapSection'
+import SwapPage from './pages/SwapPage'
 
 
 const connectors = connectorsForWallets(
@@ -128,8 +131,9 @@ export function App() {
           <AppWrapper>
             <Header activeNav={activeNav} onNavChange={setActiveNav} />
             <ContentWrapper>
-              {activeNav === NavType.Swap && <SwapForm />}
+              {activeNav === NavType.Swap && <SwapPage />}
             </ContentWrapper>
+            <Footer /> 
           </AppWrapper>
         </ThemeProvider>
       </ApolloProvider>

@@ -975,7 +975,7 @@ const isButtonDisabled = () => {
           {successMessage && <SuccessMessage>{successMessage}</SuccessMessage>}
         </SwapContainer>
       </MainContent>
-      <CoinsSection />
+      {/* <CoinsSection /> */}
       
       {/* Loading Overlay */}
       {isSwapping && (
